@@ -1,18 +1,32 @@
 # pi-thinking-scroll
 
-A [pi](https://github.com/earendil-works/pi-coding-agent) extension that replaces the default thinking renderer with a compact scrolling TUI view.
+A [pi](https://github.com/earendil-works/pi-coding-agent) extension that densifies the TUI for **thinking** and **tool calls** (display-only).
 
 ## Features
 
-- Replaces pi's default thinking block renderer in the TUI.
-- While the model is thinking, shows a live scrolling view with at most 5 visible lines.
-- During active thinking, Markdown rendering is preserved, including inline code and code blocks.
-- After thinking finishes:
-  - Thinking with 3 or fewer lines stays visible.
-  - Longer thinking collapses to a 3-line Markdown-rendered preview.
-  - The collapsed preview flattens original line breaks into a compact paragraph.
-- Press `Alt+T` to expand/collapse all thinking blocks.
-- Only changes TUI rendering. It does not modify LLM context, provider payloads, session messages, or stored conversation data.
+### Thinking
+
+- While the model is thinking: live scrolling view with at most **3** visible lines (Markdown preserved).
+- When thinking finishes: always collapses to a single row — **`已思考 (Alt+T)`**.
+- Press **`Alt+T`** to expand/collapse all thinking blocks.
+
+### Tools (Grok-style titles)
+
+- While a tool is running: keep pi’s native live output.
+- When a collapsible tool finishes (and tools are not expanded): one-line **rule-based title** + muted **`(Ctrl+O)`**.
+- **`edit` / `write` stay expanded** by default (full diff/content), matching Grok Build’s Edit policy.
+- Expand tool bodies with pi’s native **`Ctrl+O`**.
+
+| Tool | Collapsed title example |
+|------|-------------------------|
+| `read` | `Read \`src/a.ts\` (Ctrl+O)` |
+| `bash` | `Execute \`cargo test\` (Ctrl+O)` |
+| `grep` | `pattern (Ctrl+O)` |
+| `find` | `Find \`**/*.ts\` (Ctrl+O)` |
+| `ls` | `List \`.\` (Ctrl+O)` |
+| `edit` / `write` | *not collapsed* — native render |
+
+Only changes TUI rendering. It does not modify LLM context, provider payloads, session messages, or stored conversation data.
 
 ## Install
 
@@ -28,40 +42,33 @@ Or try it for one run without installing:
 pi -e git:github.com/cokekitten/pi-thinking-scroll
 ```
 
+Local checkout:
+
+```bash
+pi install /path/to/pi-thinking-scroll
+# or
+pi -e /path/to/pi-thinking-scroll
+```
+
 After installing, restart pi or run `/reload`.
 
 ## Usage
 
-Just use pi normally with a reasoning/thinking model.
+Use pi normally with a reasoning model and tools.
 
-- Active thinking: compact scrolling renderer.
-- Completed short thinking: visible inline.
-- Completed long thinking: collapsed to a 3-line preview.
-- `Alt+T`: toggle all thinking blocks expanded/collapsed.
+| Key | Action |
+|-----|--------|
+| `Alt+T` | Expand/collapse all thinking |
+| `Ctrl+O` | Expand/collapse tool outputs (pi native; collapsible tools become title-only when collapsed) |
 
 ## Notes
 
-This extension monkey-patches pi's internal `AssistantMessageComponent` rendering method. That makes it possible to fully replace the built-in thinking renderer, but it also means the extension may need updates if pi changes its internal TUI implementation.
-
-The extension is intentionally display-only:
-
-- It does not alter messages saved in session files.
-- It does not alter model requests or responses.
-- It does not affect context construction.
-- It does not change tool calls or tool results.
+This extension monkey-patches pi’s internal `AssistantMessageComponent` and `ToolExecutionComponent` rendering. That makes full chrome replacement possible, but the extension may need updates if pi changes its internal TUI implementation.
 
 ## Development
 
-Clone the repository and load it as a local pi package:
-
 ```bash
-pi install /path/to/pi-thinking-scroll
-```
-
-Or run once:
-
-```bash
-pi -e /path/to/pi-thinking-scroll
+npm test   # pure title helpers
 ```
 
 Package resources are declared in `package.json` under the `pi.extensions` field.

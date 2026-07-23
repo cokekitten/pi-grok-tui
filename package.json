@@ -1,16 +1,20 @@
 {
   "name": "pi-thinking-scroll",
-  "version": "0.1.0",
-  "description": "A pi extension that replaces the default thinking renderer with a compact scrolling TUI view.",
+  "version": "0.2.0",
+  "description": "Compact thinking titles and Grok-style collapsed tool titles for the pi TUI.",
   "type": "module",
   "license": "MIT",
   "keywords": [
     "pi-package",
     "pi-extension",
     "thinking",
+    "tools",
     "tui",
     "llm"
   ],
+  "scripts": {
+    "test": "node --experimental-strip-types --test tool-titles.test.mjs"
+  },
   "pi": {
     "extensions": [
       "./extensions/thinking-scroll.ts"
