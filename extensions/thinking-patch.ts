@@ -96,8 +96,15 @@ export async function installThinkingPatch(): Promise<() => void> {
       // Spacing (Grok-like):
       // - one blank after user prompt (or previous prose) before this message
       // - chrome rows stack tightly; one blank between chrome and prose body
+      // Note: first updateContent may run before addChild (parent unset). Parent
+      // stamp re-invokes updateContent after addChild so the gap is applied.
       const prev = getPreviousSibling(this);
-      if (shouldGapAfter(prev)) {
+      const needsLeadGap = shouldGapAfter(prev);
+      if (needsLeadGap) {
+        this.contentContainer.addChild(new Spacer(1));
+      } else if (hasText && prev == null) {
+        // Parent not stamped yet — conservative gap so user→first chrome
+        // never sticks. Tight tool→thought is fixed on the re-layout pass.
         this.contentContainer.addChild(new Spacer(1));
       } else if (hasText) {
         // Message starts with body text (no thinking first) after chrome tools:

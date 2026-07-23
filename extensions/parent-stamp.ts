@@ -1,6 +1,10 @@
 /**
  * Stamp each TUI child with its parent Container so chrome spacing can
  * inspect previous siblings (user message → first thought/tool, prose → tool).
+ *
+ * Important: pi often constructs AssistantMessage/ToolExecution and runs
+ * updateContent/updateDisplay *before* chatContainer.addChild. We therefore
+ * re-run layout after stamping the parent so leading spacers apply.
  */
 import { Container } from "@earendil-works/pi-tui";
 
@@ -31,23 +35,26 @@ export function getPreviousSibling(node: unknown): unknown | null {
 export function isUserMessageComponent(c: unknown): boolean {
   if (!c || typeof c !== "object") return false;
   const o = c as Record<string, unknown>;
-  return (
-    typeof o.text === "string" &&
-    typeof o.rebuild === "function" &&
-    typeof o.updateContent !== "function" &&
-    typeof o.toolName !== "string"
-  );
+  // Class fields: text, rebuild, outputPad; Box with userMessageBg inside
+  if (typeof o.toolName === "string") return false;
+  if (typeof o.updateContent === "function") return false;
+  if (typeof o.updateDisplay === "function") return false;
+  if (typeof o.rebuild === "function" && (typeof o.text === "string" || "text" in o)) {
+    return true;
+  }
+  // Fallback: constructor name when available
+  const name = (c as { constructor?: { name?: string } }).constructor?.name;
+  return name === "UserMessageComponent";
 }
 
 /** Heuristic: pi AssistantMessageComponent */
 export function isAssistantMessageComponent(c: unknown): boolean {
   if (!c || typeof c !== "object") return false;
   const o = c as Record<string, unknown>;
-  return (
-    typeof o.updateContent === "function" &&
-    o.contentContainer != null &&
-    typeof o.toolName !== "string"
-  );
+  if (typeof o.toolName === "string") return false;
+  if (typeof o.updateContent === "function" && o.contentContainer != null) return true;
+  const name = (c as { constructor?: { name?: string } }).constructor?.name;
+  return name === "AssistantMessageComponent";
 }
 
 export function assistantHasProse(c: unknown): boolean {
@@ -80,6 +87,26 @@ export function shouldGapAfter(prev: unknown | null): boolean {
   return true;
 }
 
+function relayoutChild(child: unknown): void {
+  if (!child || typeof child !== "object") return;
+  const o = child as {
+    lastMessage?: unknown;
+    updateContent?: (msg: unknown) => void;
+    updateDisplay?: () => void;
+  };
+  try {
+    if (typeof o.updateContent === "function" && o.lastMessage != null) {
+      o.updateContent(o.lastMessage);
+      return;
+    }
+    if (typeof o.updateDisplay === "function") {
+      o.updateDisplay();
+    }
+  } catch {
+    /* ignore layout refresh failures */
+  }
+}
+
 export function installParentStamp(): () => void {
   const proto = Container.prototype as {
     addChild: (this: { children?: unknown[] }, child: unknown) => void;
@@ -89,7 +116,10 @@ export function installParentStamp(): () => void {
     if (child && typeof child === "object") {
       (child as Record<string, unknown>)[PARENT_KEY] = this;
     }
-    return original.call(this, child);
+    const ret = original.call(this, child);
+    // Constructor often laid out chrome before parent existed — fix spacing now.
+    relayoutChild(child);
+    return ret;
   };
   return () => {
     proto.addChild = original;
