@@ -1,5 +1,5 @@
 /**
- * ThinkingScrollComponent — live 3-line scroll, finished title-only collapse.
+ * ThinkingScrollComponent — live 3-line scroll, finished Grok-style title.
  */
 import {
   Markdown,
@@ -7,11 +7,12 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
+import { formatChromeLine, type ChromeTheme } from "./chrome.js";
 import { getState } from "./state.js";
 
 export const MAX_VISIBLE_LINES = 3;
 
-export interface ThinkingThemeLike {
+export interface ThinkingThemeLike extends ChromeTheme {
   fg(color: string, text: string): string;
   bold(text: string): string;
 }
@@ -62,7 +63,6 @@ export class ThinkingScrollComponent {
     } else if (isExpanded) {
       lines = this.buildExpanded(fullText, width);
     } else {
-      // Finished: always title-only (no ≤3-line exception)
       lines = this.buildFinishedTitle(width);
     }
 
@@ -70,12 +70,14 @@ export class ThinkingScrollComponent {
     return lines;
   }
 
-  /** Finished collapsed: single row `│ 已思考 (Alt+T)` */
+  /** Finished collapsed: `◆ 已思考 (Alt+T)` — same chrome family as tools. */
   private buildFinishedTitle(width: number): string[] {
-    const prefix = "│ ";
-    const title = this.theme.fg("dim", "已思考");
-    const hint = this.theme.fg("muted", " (Alt+T)");
-    return [truncateToWidth(`${prefix}${title}${hint}`, width, "")];
+    const line = formatChromeLine(this.theme, {
+      kind: "thinking",
+      label: "已思考",
+      hint: " (Alt+T)",
+    });
+    return [truncateToWidth(line, width, "")];
   }
 
   private buildActive(fullText: string, width: number): string[] {
@@ -89,27 +91,31 @@ export class ThinkingScrollComponent {
     const visible = rendered.slice(-MAX_VISIBLE_LINES);
 
     const lines: string[] = [];
-    lines.push(
-      truncateToWidth(
-        `│ ${spinner} ${this.theme.bold(this.theme.fg("thinkingXhigh", "Thinking..."))}`,
-        width,
-        "",
-      ),
-    );
+    const header = formatChromeLine(this.theme, {
+      kind: "thinking",
+      label: `${spinner} 思考中…`,
+    });
+    lines.push(truncateToWidth(header, width, ""));
 
     for (const l of visible) {
-      lines.push(truncateToWidth(`│ ${l}`, width, ""));
+      lines.push(truncateToWidth(`  ${l}`, width, ""));
     }
 
     return lines;
   }
 
   private buildExpanded(fullText: string, width: number): string[] {
-    const indent = "  ";
+    // Header row + body (Grok: diamond label, then content indented)
+    const header = formatChromeLine(this.theme, {
+      kind: "thinking",
+      label: "已思考",
+      hint: " (Alt+T)",
+    });
     const rendered = this.renderThinkingMarkdown(fullText, width - 2, {
       preserveLineBreaks: true,
     });
-    return rendered.map((l) => (l.trim() === "" ? "" : `${indent}${l}`));
+    const body = rendered.map((l) => (l.trim() === "" ? "" : `  ${l}`));
+    return [truncateToWidth(header, width, ""), ...body];
   }
 
   private thinkingDefaultStyle() {
@@ -149,7 +155,6 @@ export class ThinkingScrollComponent {
     return lines;
   }
 
-  /** Kept for potential future width measurements; unused in title-only path. */
   wrapThinkingText(text: string, width: number): string[] {
     const rawLines = text.split("\n");
     const result: string[] = [];

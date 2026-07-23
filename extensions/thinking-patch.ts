@@ -92,7 +92,16 @@ export async function installThinkingPatch(): Promise<() => void> {
       const hasToolCalls = message.content.some((c) => c.type === "toolCall");
       this.hasToolCalls = hasToolCalls;
 
-      if (hasThinking || hasText) {
+      // Spacing (Grok-like):
+      // - chrome rows (thinking/tools) stack tightly with no extra blank
+      // - one blank line between chrome and prose body
+      // Leading spacer only when the message starts with body text (after tools).
+      const firstMeaningful = message.content.find(
+        (c) =>
+          (c.type === "text" && (c.text || "").trim().length > 0) ||
+          (c.type === "thinking" && !c.redacted && (c.thinking || "").trim().length > 0),
+      );
+      if (hasText && firstMeaningful?.type === "text") {
         this.contentContainer.addChild(new Spacer(1));
       }
 
@@ -108,16 +117,27 @@ export async function installThinkingPatch(): Promise<() => void> {
           (c, i) =>
             c.type === "text" && (c.text || "").trim().length > 0 && i > lastThinkingIndex,
         );
+      const hasTextBeforeThinking =
+        hasThinking &&
+        message.content.some(
+          (c, i) =>
+            c.type === "text" && (c.text || "").trim().length > 0 && i < lastThinkingIndex,
+        );
 
       for (const block of message.content) {
         if (block.type === "text" && (block.text || "").trim().length > 0) {
+          // Blank line before body when it follows thinking in this message
+          // (hasTextAfterThinking path adds spacer after thinking instead).
           this.contentContainer.addChild(
-            new Markdown((block.text || "").trim(), 1, 0, this.markdownTheme as any),
+            new Markdown((block.text || "").trim(), 0, 0, this.markdownTheme as any),
           );
           continue;
         }
 
         if (block.type === "thinking" && hasThinking && !renderedThinking) {
+          if (hasTextBeforeThinking) {
+            this.contentContainer.addChild(new Spacer(1));
+          }
           this.contentContainer.addChild(
             new ThinkingScrollComponent(
               uiTheme,
@@ -131,6 +151,7 @@ export async function installThinkingPatch(): Promise<() => void> {
           );
           renderedThinking = true;
           if (hasTextAfterThinking) {
+            // chrome → prose gap
             this.contentContainer.addChild(new Spacer(1));
           }
         }

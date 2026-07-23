@@ -1,12 +1,12 @@
 /**
  * Monkey-patch ToolExecutionComponent:
- * - Finished collapsible tools → one compact title row with green/red dots
- * - No success/error background blocks
- * - No vertical spacer / box padding on collapsed rows
- * - Consecutive collapsible tools merge into Grok-style group headers
- * - edit/write always use native expanded render
+ * - Finished collapsible tools → compact Grok-style chrome row
+ * - True green/red diamonds (not theme olive "success")
+ * - Group consecutive collapsible tools
+ * - edit/write always native expanded
  */
 import { Text } from "@earendil-works/pi-tui";
+import { formatChromeLine, type ChromeTheme } from "./chrome.js";
 import {
   importInternal,
   PI_CODING_AGENT,
@@ -18,7 +18,7 @@ import {
   isCollapsibleTool,
 } from "./tool-titles.js";
 
-interface ThemeLike {
+interface ThemeLike extends ChromeTheme {
   fg(color: string, text: string): string;
   bg(color: string, text: string): string;
   bold(text: string): string;
@@ -77,7 +77,6 @@ function isSpacer(c: unknown): c is { lines: number; setLines?: (n: number) => v
   );
 }
 
-/** Walk TUI tree to find the parent Container that holds `self`. */
 function findParentChildren(self: ToolExecutionProto): unknown[] | null {
   const root = self.ui;
   if (!root || !Array.isArray(root.children)) return null;
@@ -106,10 +105,6 @@ function isTitleOnlyCandidate(t: ToolExecutionProto): boolean {
   );
 }
 
-/**
- * Consecutive title-only tools around `self` in the chat child list.
- * Returns members + whether `self` is the group header (first).
- */
 function consecutiveGroup(self: ToolExecutionProto): {
   members: ToolExecutionProto[];
   isHeader: boolean;
@@ -128,7 +123,6 @@ function consecutiveGroup(self: ToolExecutionProto): {
     return { members: [self], isHeader: true };
   }
 
-  // Expand left/right while consecutive sibling indices and title-only
   let start = selfIdx;
   let end = selfIdx;
   while (
@@ -146,26 +140,14 @@ function consecutiveGroup(self: ToolExecutionProto): {
     end += 1;
   }
 
-  // Only claim tools that are themselves title-only (self is)
-  const members = tools.slice(start, end + 1).map((x) => x.c).filter(isTitleOnlyCandidate);
+  const members = tools
+    .slice(start, end + 1)
+    .map((x) => x.c)
+    .filter(isTitleOnlyCandidate);
   if (members.length === 0) {
     return { members: [self], isHeader: true };
   }
   return { members, isHeader: members[0] === self };
-}
-
-function statusDot(theme: ThemeLike, isError: boolean): string {
-  // Filled diamond-ish bullet, matches Grok screenshot feel
-  const glyph = "●";
-  if (isError) {
-    return theme.fg("error", glyph);
-  }
-  // success — prefer success/accent green if present
-  try {
-    return theme.fg("success", glyph);
-  } catch {
-    return theme.fg("toolTitle", glyph);
-  }
 }
 
 function clearImages(self: ToolExecutionProto): void {
@@ -191,8 +173,7 @@ function clearImages(self: ToolExecutionProto): void {
   }
 }
 
-function setCollapsedChrome(self: ToolExecutionProto, theme: ThemeLike, line: string): void {
-  // Zero spacer above tool row
+function setCollapsedChrome(self: ToolExecutionProto, line: string): void {
   if (Array.isArray(self.children)) {
     for (const child of self.children) {
       if (isSpacer(child)) {
@@ -202,7 +183,6 @@ function setCollapsedChrome(self: ToolExecutionProto, theme: ThemeLike, line: st
     }
   }
 
-  // No tinted background — pass-through bgFn
   const passthrough = (t: string) => t;
 
   if (self.hasRendererDefinition()) {
@@ -217,7 +197,6 @@ function setCollapsedChrome(self: ToolExecutionProto, theme: ThemeLike, line: st
       renderContainer.setBgFn(passthrough);
     }
     renderContainer.clear();
-    // Text with zero padding so one physical line, no wrap padding rows
     renderContainer.addChild(new Text(line, 0, 0) as any);
     self.hideComponent = false;
   } else {
@@ -227,9 +206,6 @@ function setCollapsedChrome(self: ToolExecutionProto, theme: ThemeLike, line: st
     self.contentText.setText(line);
     self.hideComponent = false;
   }
-
-  // Avoid unused theme lint in passthrough path
-  void theme;
 }
 
 function restoreNativeChrome(self: ToolExecutionProto): void {
@@ -244,6 +220,28 @@ function restoreNativeChrome(self: ToolExecutionProto): void {
   if (self.contentBox && typeof self.contentBox.paddingY === "number") {
     self.contentBox.paddingX = 1;
     self.contentBox.paddingY = 1;
+  }
+}
+
+function refreshSiblings(
+  self: ToolExecutionProto,
+  members: ToolExecutionProto[],
+  refreshDepth: { n: number },
+): void {
+  if (refreshDepth.n > 0 || members.length <= 1) return;
+  refreshDepth.n += 1;
+  try {
+    for (const m of members) {
+      if (m !== self) {
+        try {
+          m.updateDisplay();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  } finally {
+    refreshDepth.n -= 1;
   }
 }
 
@@ -272,9 +270,7 @@ export async function installToolCollapsePatch(): Promise<() => void> {
   }
 
   const originalUpdateDisplay = prototype.updateDisplay;
-
-  // Coalesce sibling refresh so one tool finishing re-lays out the whole group
-  let refreshDepth = 0;
+  const refreshDepth = { n: 0 };
 
   const patchedUpdateDisplay = function (this: ToolExecutionProto) {
     try {
@@ -291,7 +287,6 @@ export async function installToolCollapsePatch(): Promise<() => void> {
       const { members, isHeader } = consecutiveGroup(this);
 
       if (!isHeader) {
-        // Folded into a group header above — hide this row entirely
         this.hideComponent = true;
         if (Array.isArray(this.children)) {
           for (const child of this.children) {
@@ -301,66 +296,45 @@ export async function installToolCollapsePatch(): Promise<() => void> {
             }
           }
         }
-        // Still refresh header so its count updates when a later tool finishes
-        if (refreshDepth === 0 && members.length > 1) {
-          refreshDepth += 1;
-          try {
-            for (const m of members) {
-              if (m !== this) {
-                try {
-                  m.updateDisplay();
-                } catch {
-                  /* ignore */
-                }
-              }
-            }
-          } finally {
-            refreshDepth -= 1;
-          }
-        }
+        refreshSiblings(this, members, refreshDepth);
         return;
       }
 
-      const anyError = members.some((m) => m.result?.isError === true);
-      const dot = statusDot(theme, anyError);
+      const failed = members.filter((m) => m.result?.isError === true).length;
+      const anyError = failed > 0;
 
-      let label: string;
+      let line: string;
       if (members.length >= 2) {
-        label = formatVerbGroupLabel(
+        // Grok group: hollow diamond + aggregated label; failed as red suffix
+        const base = formatVerbGroupLabel(
           members.map((m) => ({
             toolName: m.toolName,
             isError: m.result?.isError === true,
           })),
         );
+        // Strip trailing " · N failed" so we can color it separately
+        const failedMatch = base.match(/^(.*?)( · \d+ failed)$/);
+        const label = failedMatch ? failedMatch[1]! : base;
+        const failedSuffix = failedMatch ? failedMatch[2]! : undefined;
+        line = formatChromeLine(theme, {
+          kind: anyError ? "group_err" : "group",
+          label,
+          failedSuffix,
+          hint: " (Ctrl+O)",
+        });
       } else {
-        label = formatCollapsedToolLabel(this.toolName, this.args, {
+        const label = formatCollapsedToolLabel(this.toolName, this.args, {
           cwd: this.cwd,
-          isError: this.result?.isError === true,
+        });
+        line = formatChromeLine(theme, {
+          kind: anyError ? "tool_err" : "tool_ok",
+          label,
+          hint: " (Ctrl+O)",
         });
       }
 
-      const titleStyled = theme.fg("muted", theme.bold(label));
-      const line = `${dot} ${titleStyled}`;
-
-      setCollapsedChrome(this, theme, line);
-
-      // Refresh other group members so they hide / re-header correctly
-      if (refreshDepth === 0 && members.length > 1) {
-        refreshDepth += 1;
-        try {
-          for (const m of members) {
-            if (m !== this) {
-              try {
-                m.updateDisplay();
-              } catch {
-                /* ignore sibling refresh */
-              }
-            }
-          }
-        } finally {
-          refreshDepth -= 1;
-        }
-      }
+      setCollapsedChrome(this, line);
+      refreshSiblings(this, members, refreshDepth);
     } catch {
       try {
         restoreNativeChrome(this);

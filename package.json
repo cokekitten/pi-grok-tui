@@ -1,7 +1,7 @@
 {
   "name": "pi-thinking-scroll",
-  "version": "0.2.0",
-  "description": "Compact thinking titles and Grok-style collapsed tool titles for the pi TUI.",
+  "version": "0.2.1",
+  "description": "Grok-style compact thinking + tool chrome for the pi TUI.",
   "type": "module",
   "license": "MIT",
   "keywords": [
