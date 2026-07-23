@@ -8,6 +8,7 @@ import {
   INTERNAL_MODULES,
 } from "./internal-import.js";
 import { getPreviousSibling, shouldGapAfter } from "./parent-stamp.js";
+import { safeFg } from "./chrome.js";
 import { ThinkingScrollComponent, type ThinkingThemeLike } from "./thinking-render.js";
 
 interface ContentBlock {
@@ -171,22 +172,36 @@ export async function installThinkingPatch(): Promise<() => void> {
         }
       }
 
-      if (!hasToolCalls) {
+      // Surface hard failures only when there's no tool row to own the error.
+      // Keep to a single line so resume rebuild never paints a multi-line red wall.
+      // Skip when we already show Thought chrome (abort-during-think is common).
+      if (!hasToolCalls && !hasThinking) {
         if (message.stopReason === "aborted") {
-          const msg =
+          const raw =
             message.errorMessage && message.errorMessage !== "Request was aborted"
               ? message.errorMessage
               : "Aborted";
+          const msg = raw.split("\n")[0]!.slice(0, 200);
           this.contentContainer.addChild(new Spacer(1));
           this.contentContainer.addChild(
-            new Text(uiTheme.fg("error", msg), 1, 0) as any,
+            new Text(safeFg(uiTheme, "error", msg), 0, 0) as any,
           );
         } else if (message.stopReason === "error") {
+          const raw = (message.errorMessage || "Unknown").split("\n")[0]!.slice(0, 200);
+          this.contentContainer.addChild(new Spacer(1));
+          this.contentContainer.addChild(
+            new Text(safeFg(uiTheme, "error", `Error: ${raw}`), 0, 0) as any,
+          );
+        } else if (message.stopReason === "length") {
           this.contentContainer.addChild(new Spacer(1));
           this.contentContainer.addChild(
             new Text(
-              uiTheme.fg("error", `Error: ${message.errorMessage || "Unknown"}`),
-              1,
+              safeFg(
+                uiTheme,
+                "error",
+                "Error: hit max output tokens (response may be incomplete)",
+              ),
+              0,
               0,
             ) as any,
           );
@@ -195,8 +210,9 @@ export async function installThinkingPatch(): Promise<() => void> {
 
       this.hideThinkingBlock = false;
     } catch {
+      // Prefer empty chrome over native full-thinking + red error walls.
       try {
-        originalUpdateContent.call(this, message);
+        this.contentContainer.clear();
       } catch {
         /* unrecoverable */
       }

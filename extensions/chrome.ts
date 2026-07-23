@@ -10,16 +10,19 @@
  *
  * Note: pi dark theme `success` is olive `#b5bd68` (reads yellow).
  * Status dots use a true green via truecolor/256 ANSI instead.
+ *
+ * All theme.fg access is fail-soft so a missing color token never throws
+ * during resume rebuild (which used to fall back to native red error UI).
  */
 
 export interface ChromeTheme {
   fg(color: string, text: string): string;
-  bold(text: string): string;
+  bold?(text: string): string;
 }
 
 /** True green — not theme "success" (often olive/yellow). */
 const STATUS_GREEN = "#4ade80";
-/** Clear red for failures (slightly brighter than theme olive-reds). */
+/** Clear red for failures. */
 const STATUS_RED = "#f87171";
 
 function ansiFgHex(hex: string, text: string): string {
@@ -29,8 +32,21 @@ function ansiFgHex(hex: string, text: string): string {
   const g = parseInt(h.slice(2, 4), 16);
   const b = parseInt(h.slice(4, 6), 16);
   if ([r, g, b].some((n) => Number.isNaN(n))) return text;
-  // truecolor; terminals without it usually still degrade acceptably
   return `\x1b[38;2;${r};${g};${b}m${text}\x1b[39m`;
+}
+
+/** Safe theme.fg — never throws. */
+export function safeFg(
+  theme: ChromeTheme | null | undefined,
+  color: string,
+  text: string,
+): string {
+  if (!theme || typeof theme.fg !== "function") return text;
+  try {
+    return theme.fg(color, text);
+  } catch {
+    return text;
+  }
 }
 
 export type ChromeKind =
@@ -55,14 +71,17 @@ export function chromeGlyph(kind: ChromeKind): string {
   }
 }
 
-export function colorGlyph(kind: ChromeKind, glyph: string, theme: ChromeTheme): string {
+export function colorGlyph(
+  kind: ChromeKind,
+  glyph: string,
+  theme: ChromeTheme,
+): string {
   switch (kind) {
     case "thinking":
     case "tool_run":
     case "group":
     case "group_err":
-      // hollow/running diamonds stay muted; failure shown in label suffix
-      return theme.fg("muted", glyph);
+      return safeFg(theme, "muted", glyph);
     case "tool_ok":
       return ansiFgHex(STATUS_GREEN, glyph);
     case "tool_err":
@@ -86,12 +105,16 @@ export function formatChromeLine(
     failedSuffix?: string;
   },
 ): string {
-  const glyph = colorGlyph(opts.kind, chromeGlyph(opts.kind), theme);
-  // Same weight/color family for thinking + tools (no bold white titles)
-  const label = theme.fg("muted", opts.label);
-  const hint = opts.hint ? theme.fg("dim", opts.hint) : "";
-  const failed = opts.failedSuffix
-    ? theme.fg("error", opts.failedSuffix)
-    : "";
-  return `${glyph} ${label}${failed}${hint}`;
+  try {
+    const glyph = colorGlyph(opts.kind, chromeGlyph(opts.kind), theme);
+    const label = safeFg(theme, "muted", opts.label);
+    const hint = opts.hint ? safeFg(theme, "dim", opts.hint) : "";
+    const failed = opts.failedSuffix
+      ? safeFg(theme, "error", opts.failedSuffix)
+      : "";
+    return `${glyph} ${label}${failed}${hint}`;
+  } catch {
+    // Absolute last resort — plain text, never throw into resume rebuild.
+    return `◆ ${opts.label}${opts.failedSuffix ?? ""}${opts.hint ?? ""}`;
+  }
 }

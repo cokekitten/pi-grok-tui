@@ -5,10 +5,15 @@
  * Important: pi often constructs AssistantMessage/ToolExecution and runs
  * updateContent/updateDisplay *before* chatContainer.addChild. We therefore
  * re-run layout after stamping the parent so leading spacers apply.
+ *
+ * Relayout is restricted to top-level assistant/tool components and is
+ * reentrancy-guarded so nested addChild during updateContent never storms.
  */
 import { Container } from "@earendil-works/pi-tui";
 
 const PARENT_KEY = "__piThinkingScrollParent";
+
+let relayoutDepth = 0;
 
 export function getParent(node: unknown): { children?: unknown[] } | null {
   if (!node || typeof node !== "object") return null;
@@ -35,14 +40,12 @@ export function getPreviousSibling(node: unknown): unknown | null {
 export function isUserMessageComponent(c: unknown): boolean {
   if (!c || typeof c !== "object") return false;
   const o = c as Record<string, unknown>;
-  // Class fields: text, rebuild, outputPad; Box with userMessageBg inside
   if (typeof o.toolName === "string") return false;
   if (typeof o.updateContent === "function") return false;
   if (typeof o.updateDisplay === "function") return false;
   if (typeof o.rebuild === "function" && (typeof o.text === "string" || "text" in o)) {
     return true;
   }
-  // Fallback: constructor name when available
   const name = (c as { constructor?: { name?: string } }).constructor?.name;
   return name === "UserMessageComponent";
 }
@@ -87,13 +90,27 @@ export function shouldGapAfter(prev: unknown | null): boolean {
   return true;
 }
 
+function isRelayoutTarget(child: unknown): boolean {
+  if (!child || typeof child !== "object") return false;
+  const o = child as Record<string, unknown>;
+  // ToolExecutionComponent
+  if (typeof o.toolName === "string" && typeof o.updateDisplay === "function") return true;
+  // AssistantMessageComponent
+  if (typeof o.updateContent === "function" && o.contentContainer != null) return true;
+  return false;
+}
+
 function relayoutChild(child: unknown): void {
-  if (!child || typeof child !== "object") return;
+  if (relayoutDepth > 0) return;
+  if (!isRelayoutTarget(child)) return;
+
   const o = child as {
     lastMessage?: unknown;
     updateContent?: (msg: unknown) => void;
     updateDisplay?: () => void;
   };
+
+  relayoutDepth += 1;
   try {
     if (typeof o.updateContent === "function" && o.lastMessage != null) {
       o.updateContent(o.lastMessage);
@@ -103,7 +120,9 @@ function relayoutChild(child: unknown): void {
       o.updateDisplay();
     }
   } catch {
-    /* ignore layout refresh failures */
+    // Never let resume rebuild blow up into showExtensionError red flash.
+  } finally {
+    relayoutDepth -= 1;
   }
 }
 
@@ -117,7 +136,7 @@ export function installParentStamp(): () => void {
       (child as Record<string, unknown>)[PARENT_KEY] = this;
     }
     const ret = original.call(this, child);
-    // Constructor often laid out chrome before parent existed — fix spacing now.
+    // Only top-level assistant/tool — not every Spacer/Text under them.
     relayoutChild(child);
     return ret;
   };

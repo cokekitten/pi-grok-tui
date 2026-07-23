@@ -355,11 +355,18 @@ export async function installToolCollapsePatch(): Promise<() => void> {
       setCollapsedChrome(this, line);
       refreshSiblings(this, members, refreshDepth);
     } catch {
+      // Never fall back to native updateDisplay for collapsible tools —
+      // native paints red error backgrounds / full process bodies, which
+      // flashes a red wall during /resume rebuild if anything throws.
       try {
-        restoreNativeChrome(this);
-        originalUpdateDisplay.call(this);
+        const fallback = `◆ ${this.toolName || "tool"}`;
+        setCollapsedChrome(this, fallback);
       } catch {
-        /* unrecoverable */
+        try {
+          this.hideComponent = false;
+        } catch {
+          /* unrecoverable */
+        }
       }
     }
   };

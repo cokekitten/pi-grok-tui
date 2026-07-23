@@ -110,7 +110,14 @@ export default function (pi: ExtensionAPI) {
     const state = getState();
     state.activeByTimestamp.clear();
     state.globalExpanded = false;
-    if (state.patchCleanup && state.patchRelease) return;
+
+    // Patches are process-global (prototype monkey-patches). Keep them across
+    // resume so renderBeforeBind sees them; only reinstall when missing/broken.
+    if (state.patchCleanup && state.patchRelease) {
+      degraded = false;
+      return;
+    }
+
     if (state.patchCleanup && !state.patchRelease) {
       try {
         state.patchCleanup();
@@ -127,12 +134,17 @@ export default function (pi: ExtensionAPI) {
       state.patchRelease = await retainPatch();
       degraded = false;
     } catch (error) {
+      // Never throw — extension onError paints a red stack into the chat.
       degraded = true;
       if (ctx.hasUI) {
-        ctx.ui.notify(
-          `thinking-scroll: ${error instanceof Error ? error.message : String(error)}`,
-          "warning",
-        );
+        try {
+          ctx.ui.notify(
+            `thinking-scroll: ${error instanceof Error ? error.message : String(error)}`,
+            "warning",
+          );
+        } catch {
+          /* ignore */
+        }
       }
     }
   });
