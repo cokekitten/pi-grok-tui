@@ -12,6 +12,7 @@ import {
   PI_CODING_AGENT,
   INTERNAL_MODULES,
 } from "./internal-import.js";
+import { getPreviousSibling, getSiblings, shouldGapAfter } from "./parent-stamp.js";
 import {
   formatCollapsedToolLabel,
   formatVerbGroupLabel,
@@ -78,6 +79,10 @@ function isSpacer(c: unknown): c is { lines: number; setLines?: (n: number) => v
 }
 
 function findParentChildren(self: ToolExecutionProto): unknown[] | null {
+  // Prefer parent stamp (reliable); fall back to walking TUI tree.
+  const stamped = getSiblings(self);
+  if (stamped) return stamped;
+
   const root = self.ui;
   if (!root || !Array.isArray(root.children)) return null;
 
@@ -178,11 +183,13 @@ function clearImages(self: ToolExecutionProto): void {
 }
 
 function setCollapsedChrome(self: ToolExecutionProto, line: string): void {
+  // Leading spacer: gap after user prompt or assistant prose; none between tools.
+  const lead = shouldGapAfter(getPreviousSibling(self)) ? 1 : 0;
   if (Array.isArray(self.children)) {
     for (const child of self.children) {
       if (isSpacer(child)) {
-        if (typeof child.setLines === "function") child.setLines(0);
-        else child.lines = 0;
+        if (typeof child.setLines === "function") child.setLines(lead);
+        else child.lines = lead;
       }
     }
   }

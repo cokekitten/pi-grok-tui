@@ -7,6 +7,7 @@ import {
   PI_CODING_AGENT,
   INTERNAL_MODULES,
 } from "./internal-import.js";
+import { getPreviousSibling, shouldGapAfter } from "./parent-stamp.js";
 import { ThinkingScrollComponent, type ThinkingThemeLike } from "./thinking-render.js";
 
 interface ContentBlock {
@@ -93,16 +94,22 @@ export async function installThinkingPatch(): Promise<() => void> {
       this.hasToolCalls = hasToolCalls;
 
       // Spacing (Grok-like):
-      // - chrome rows (thinking/tools) stack tightly with no extra blank
-      // - one blank line between chrome and prose body
-      // Leading spacer only when the message starts with body text (after tools).
-      const firstMeaningful = message.content.find(
-        (c) =>
-          (c.type === "text" && (c.text || "").trim().length > 0) ||
-          (c.type === "thinking" && !c.redacted && (c.thinking || "").trim().length > 0),
-      );
-      if (hasText && firstMeaningful?.type === "text") {
+      // - one blank after user prompt (or previous prose) before this message
+      // - chrome rows stack tightly; one blank between chrome and prose body
+      const prev = getPreviousSibling(this);
+      if (shouldGapAfter(prev)) {
         this.contentContainer.addChild(new Spacer(1));
+      } else if (hasText) {
+        // Message starts with body text (no thinking first) after chrome tools:
+        // still separate prose from the previous tool chrome.
+        const firstMeaningful = message.content.find(
+          (c) =>
+            (c.type === "text" && (c.text || "").trim().length > 0) ||
+            (c.type === "thinking" && !c.redacted && (c.thinking || "").trim().length > 0),
+        );
+        if (firstMeaningful?.type === "text") {
+          this.contentContainer.addChild(new Spacer(1));
+        }
       }
 
       let renderedThinking = false;

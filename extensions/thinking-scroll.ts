@@ -16,11 +16,14 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
+import { installParentStamp } from "./parent-stamp.js";
 import { getState } from "./state.js";
 import { installThinkingPatch } from "./thinking-patch.js";
 import { installToolCollapsePatch } from "./tool-collapse.js";
 
 async function installPatch(): Promise<() => void> {
+  // Parent stamp first so subsequent UI builds record siblings for spacing.
+  const cleanupStamp = installParentStamp();
   const cleanupThinking = await installThinkingPatch();
   let cleanupTools: (() => void) | undefined;
   try {
@@ -35,6 +38,7 @@ async function installPatch(): Promise<() => void> {
   return () => {
     cleanupThinking();
     cleanupTools?.();
+    cleanupStamp();
   };
 }
 
