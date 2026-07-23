@@ -13,17 +13,17 @@ A [pi](https://github.com/earendil-works/pi-coding-agent) extension that densifi
 ### Tools (Grok-style titles)
 
 - While a tool is running: keep pi’s native live output.
-- When a collapsible tool finishes (and tools are not expanded): one-line **rule-based title** + muted **`(Ctrl+O)`**.
+- When a collapsible tool finishes (and tools are not expanded): **one compact line** with a **green/red status dot** (no tinted background blocks).
+- Consecutive collapsible tools **merge** into a Grok-style header, e.g. `● Read 2 files` or `● Ran 1 command · 1 failed`.
 - **`edit` / `write` stay expanded** by default (full diff/content), matching Grok Build’s Edit policy.
 - Expand tool bodies with pi’s native **`Ctrl+O`**.
 
 | Tool | Collapsed title example |
 |------|-------------------------|
-| `read` | `Read \`src/a.ts\` (Ctrl+O)` |
-| `bash` | `Execute \`cargo test\` (Ctrl+O)` |
-| `grep` | `pattern (Ctrl+O)` |
-| `find` | `Find \`**/*.ts\` (Ctrl+O)` |
-| `ls` | `List \`.\` (Ctrl+O)` |
+| `read` | `● Read \`src/a.ts\`` |
+| `bash` | `● Execute \`cargo test\`` |
+| multi-read | `● Read 2 files` |
+| failed bash | `● Ran 1 command · 1 failed` (red dot) |
 | `edit` / `write` | *not collapsed* — native render |
 
 Only changes TUI rendering. It does not modify LLM context, provider payloads, session messages, or stored conversation data.

@@ -4,7 +4,10 @@ import {
   isCollapsibleTool,
   formatToolTitle,
   formatCollapsedToolLabel,
+  formatVerbGroupLabel,
   stripRedundantSessionCd,
+  flattenOneLine,
+  verbKindForTool,
 } from "./extensions/tool-titles.ts";
 
 describe("isCollapsibleTool", () => {
@@ -17,6 +20,12 @@ describe("isCollapsibleTool", () => {
     for (const n of ["read", "bash", "grep", "find", "ls", "mcp__x__y", "unknown"]) {
       assert.equal(isCollapsibleTool(n), true, n);
     }
+  });
+});
+
+describe("flattenOneLine", () => {
+  it("collapses newlines and spaces", () => {
+    assert.equal(flattenOneLine("a\n\nb  c"), "a b c");
   });
 });
 
@@ -45,6 +54,15 @@ describe("formatToolTitle", () => {
     assert.equal(formatToolTitle("write", { path: "src/a.ts" }), "Write `src/a.ts`");
   });
 
+  it("flattens multiline bash to one line", () => {
+    const title = formatToolTitle("bash", {
+      command: "python - <<'PY'\nimport json\nprint(1)\nPY",
+    });
+    assert.ok(title.startsWith("Execute `"));
+    assert.equal(title.includes("\n"), false, title);
+    assert.ok(title.includes("python"));
+  });
+
   it("formats bash with peel and truncate", () => {
     assert.equal(
       formatToolTitle("bash", { command: "cd /proj && echo hi" }, { cwd: "/proj" }),
@@ -53,8 +71,8 @@ describe("formatToolTitle", () => {
     const long = "x".repeat(200);
     const title = formatToolTitle("bash", { command: long });
     assert.ok(title.startsWith("Execute `"));
-    assert.ok(title.endsWith("…`") || title.includes("…"));
-    assert.ok([...title].length < 120);
+    assert.ok(title.includes("…"));
+    assert.ok([...title].length < 100);
   });
 
   it("formats grep/find/ls", () => {
@@ -71,10 +89,51 @@ describe("formatToolTitle", () => {
 });
 
 describe("formatCollapsedToolLabel", () => {
-  it("adds error mark", () => {
+  it("does not prefix error mark (dots handle status)", () => {
     assert.equal(
       formatCollapsedToolLabel("read", { path: "a" }, { isError: true }),
-      "✗ Read `a`",
+      "Read `a`",
+    );
+  });
+});
+
+describe("verbKindForTool + formatVerbGroupLabel", () => {
+  it("maps common tools", () => {
+    assert.equal(verbKindForTool("read"), "file");
+    assert.equal(verbKindForTool("bash"), "command");
+    assert.equal(verbKindForTool("grep"), "search");
+    assert.equal(verbKindForTool("ls"), "dir");
+  });
+
+  it("formats multi-tool group like Grok", () => {
+    assert.equal(
+      formatVerbGroupLabel([
+        { toolName: "read" },
+        { toolName: "read" },
+      ]),
+      "Read 2 files",
+    );
+    assert.equal(
+      formatVerbGroupLabel([
+        { toolName: "bash", isError: true },
+      ]),
+      "Ran 1 command · 1 failed",
+    );
+    assert.equal(
+      formatVerbGroupLabel([
+        { toolName: "read" },
+        { toolName: "bash" },
+        { toolName: "bash", isError: true },
+      ]),
+      "Read 1 file, Ran 2 commands · 1 failed",
+    );
+    assert.equal(
+      formatVerbGroupLabel([
+        { toolName: "Get Search Content" },
+        { toolName: "Get Search Content" },
+        { toolName: "Get Search Content" },
+      ]),
+      "Called 3 MCP tools",
     );
   });
 });
