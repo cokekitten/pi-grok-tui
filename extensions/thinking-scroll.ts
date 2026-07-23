@@ -3,7 +3,7 @@
  *
  * Thinking:
  *   1. Live 3-line scrolling view while streaming
- *   2. Finished → single row `已思考 (Alt+T)`
+ *   2. Finished → single row `Thought (Alt+T)`
  *   3. Alt+T expands/collapses all thinking
  *
  * Tools:

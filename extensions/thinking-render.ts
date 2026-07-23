@@ -70,11 +70,11 @@ export class ThinkingScrollComponent {
     return lines;
   }
 
-  /** Finished collapsed: `◆ 已思考 (Alt+T)` — same chrome family as tools. */
+  /** Finished collapsed: `◆ Thought (Alt+T)` — same chrome family as tools. */
   private buildFinishedTitle(width: number): string[] {
     const line = formatChromeLine(this.theme, {
       kind: "thinking",
-      label: "已思考",
+      label: "Thought",
       hint: " (Alt+T)",
     });
     return [truncateToWidth(line, width, "")];
@@ -93,7 +93,7 @@ export class ThinkingScrollComponent {
     const lines: string[] = [];
     const header = formatChromeLine(this.theme, {
       kind: "thinking",
-      label: `${spinner} 思考中…`,
+      label: `${spinner} Thinking...`,
     });
     lines.push(truncateToWidth(header, width, ""));
 
@@ -108,7 +108,7 @@ export class ThinkingScrollComponent {
     // Header row + body (Grok: diamond label, then content indented)
     const header = formatChromeLine(this.theme, {
       kind: "thinking",
-      label: "已思考",
+      label: "Thought",
       hint: " (Alt+T)",
     });
     const rendered = this.renderThinkingMarkdown(fullText, width - 2, {

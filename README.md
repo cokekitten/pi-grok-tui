@@ -7,7 +7,7 @@ A [pi](https://github.com/earendil-works/pi-coding-agent) extension that densifi
 ### Thinking
 
 - While the model is thinking: live scrolling view with at most **3** visible lines (Markdown preserved).
-- When thinking finishes: always collapses to a single row — **`已思考 (Alt+T)`**.
+- When thinking finishes: always collapses to a single row — **`Thought (Alt+T)`**.
 - Press **`Alt+T`** to expand/collapse all thinking blocks.
 
 ### Tools (Grok-style titles)
