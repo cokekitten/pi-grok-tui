@@ -12,9 +12,9 @@ A [pi](https://github.com/earendil-works/pi-coding-agent) extension that densifi
 
 ### Tools (Grok-style titles)
 
-- While a tool is running: keep pi’s native live output.
-- When a collapsible tool finishes (and tools are not expanded): **one compact line** with a **green/red status dot** (no tinted background blocks).
-- Consecutive collapsible tools **merge** into a Grok-style header, e.g. `● Read 2 files` or `● Ran 1 command · 1 failed`.
+- Collapsible tools (**not** `edit`/`write`): **always title-only** while collapsed — including while running (no process/output body).
+- Status diamonds: muted while running, green on success, red on failure.
+- Consecutive collapsible tools **merge** into a Grok-style header, e.g. `◇ Read 2 files` or `◇ Ran 1 command · 1 failed`.
 - **`edit` / `write` stay expanded** by default (full diff/content), matching Grok Build’s Edit policy.
 - Expand tool bodies with pi’s native **`Ctrl+O`**.
 

@@ -96,13 +96,17 @@ function findParentChildren(self: ToolExecutionProto): unknown[] | null {
   return walk(root);
 }
 
+/** Still streaming / not yet finalized. */
+function isToolRunning(t: ToolExecutionProto): boolean {
+  return t.isPartial || t.result == null;
+}
+
+/**
+ * Collapsible tools (everything except edit/write) are title-only whenever
+ * collapsed — including while running. Process/output is hidden until Ctrl+O.
+ */
 function isTitleOnlyCandidate(t: ToolExecutionProto): boolean {
-  return (
-    !t.isPartial &&
-    t.result != null &&
-    !t.expanded &&
-    isCollapsibleTool(t.toolName)
-  );
+  return !t.expanded && isCollapsibleTool(t.toolName);
 }
 
 function consecutiveGroup(self: ToolExecutionProto): {
@@ -300,8 +304,11 @@ export async function installToolCollapsePatch(): Promise<() => void> {
         return;
       }
 
-      const failed = members.filter((m) => m.result?.isError === true).length;
+      const failed = members.filter(
+        (m) => !isToolRunning(m) && m.result?.isError === true,
+      ).length;
       const anyError = failed > 0;
+      const anyRunning = members.some(isToolRunning);
 
       let line: string;
       if (members.length >= 2) {
@@ -309,7 +316,7 @@ export async function installToolCollapsePatch(): Promise<() => void> {
         const base = formatVerbGroupLabel(
           members.map((m) => ({
             toolName: m.toolName,
-            isError: m.result?.isError === true,
+            isError: !isToolRunning(m) && m.result?.isError === true,
           })),
         );
         // Strip trailing " · N failed" so we can color it separately
@@ -326,8 +333,13 @@ export async function installToolCollapsePatch(): Promise<() => void> {
         const label = formatCollapsedToolLabel(this.toolName, this.args, {
           cwd: this.cwd,
         });
+        const kind = anyRunning
+          ? "tool_run"
+          : anyError
+            ? "tool_err"
+            : "tool_ok";
         line = formatChromeLine(theme, {
-          kind: anyError ? "tool_err" : "tool_ok",
+          kind,
           label,
           hint: " (Ctrl+O)",
         });

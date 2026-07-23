@@ -33,19 +33,23 @@ function ansiFgHex(hex: string, text: string): string {
   return `\x1b[38;2;${r};${g};${b}m${text}\x1b[39m`;
 }
 
-export type ChromeKind = "thinking" | "tool_ok" | "tool_err" | "group" | "group_err";
+export type ChromeKind =
+  | "thinking"
+  | "tool_run"
+  | "tool_ok"
+  | "tool_err"
+  | "group"
+  | "group_err";
 
 /** Leading glyph matching Grok diamonds. */
 export function chromeGlyph(kind: ChromeKind): string {
   switch (kind) {
     case "thinking":
-      return "◆";
+    case "tool_run":
     case "tool_ok":
-      return "◆";
     case "tool_err":
       return "◆";
     case "group":
-      return "◇";
     case "group_err":
       return "◇";
   }
@@ -54,10 +58,10 @@ export function chromeGlyph(kind: ChromeKind): string {
 export function colorGlyph(kind: ChromeKind, glyph: string, theme: ChromeTheme): string {
   switch (kind) {
     case "thinking":
+    case "tool_run":
     case "group":
-      return theme.fg("muted", glyph);
     case "group_err":
-      // hollow diamond stays muted; failure shown in label suffix
+      // hollow/running diamonds stay muted; failure shown in label suffix
       return theme.fg("muted", glyph);
     case "tool_ok":
       return ansiFgHex(STATUS_GREEN, glyph);
