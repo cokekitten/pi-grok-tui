@@ -7,8 +7,8 @@ A [pi](https://github.com/earendil-works/pi-coding-agent) extension that densifi
 ### Thinking
 
 - While the model is thinking: live scrolling view with at most **3** visible lines (Markdown preserved).
-- When thinking finishes: always collapses to a single row — **`Thought (Alt+T)`**.
-- Press **`Alt+T`** to expand/collapse all thinking blocks.
+- When thinking finishes: always collapses to a single row — **`Thought (⌥T)`** on macOS / **`Thought (Alt+T)`** elsewhere.
+- Expand/collapse thinking: **`⌥T`** (macOS), **`Alt+T`** (Linux/Windows with Meta), or **`Ctrl+Shift+T`**.
 
 ### Tools (Grok-style titles)
 
@@ -62,7 +62,7 @@ Use pi normally with a reasoning model and tools.
 
 | Key | Action |
 |-----|--------|
-| `Alt+T` | Expand/collapse all thinking |
+| `⌥T` / `Alt+T` / `Ctrl+Shift+T` | Expand/collapse all thinking |
 | `Ctrl+O` | Expand/collapse tool outputs (pi native; collapsible tools become title-only when collapsed) |
 
 ## Notes

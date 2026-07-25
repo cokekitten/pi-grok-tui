@@ -9,6 +9,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { bodyFg, formatChromeLine, safeFg, type ChromeTheme } from "./chrome.js";
 import { getState } from "./state.js";
+import { THINKING_EXPAND_HINT } from "./thinking-keys.js";
 
 export const MAX_VISIBLE_LINES = 3;
 
@@ -75,12 +76,12 @@ export class ThinkingScrollComponent {
     return lines;
   }
 
-  /** Finished collapsed: `◆ Thought (Alt+T)` — same chrome family as tools. */
+  /** Finished collapsed: `◆ Thought (⌥T)` — same chrome family as tools. */
   private buildFinishedTitle(width: number): string[] {
     const line = formatChromeLine(this.theme, {
       kind: "thinking",
       label: "Thought",
-      hint: " (Alt+T)",
+      hint: THINKING_EXPAND_HINT,
     });
     return [truncateToWidth(line, width, "")];
   }
@@ -117,7 +118,7 @@ export class ThinkingScrollComponent {
     const header = formatChromeLine(this.theme, {
       kind: "thinking",
       label: "Thought",
-      hint: " (Alt+T)",
+      hint: THINKING_EXPAND_HINT,
     });
     const rendered = this.renderThinkingMarkdown(fullText, width - 2, {
       preserveLineBreaks: true,

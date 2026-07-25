@@ -3,8 +3,8 @@
  *
  * Thinking:
  *   1. Live 3-line scrolling view while streaming
- *   2. Finished → single row `Thought (Alt+T)`
- *   3. Alt+T expands/collapses all thinking
+ *   2. Finished → single row `Thought (⌥T/Alt+T)`
+ *   3. ⌥T / Alt+T / Ctrl+Shift+T expands/collapses all thinking
  *
  * Tools:
  *   - Running: native live output
@@ -15,11 +15,11 @@
  * Display-only. Does not alter session data or model I/O.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Key } from "@earendil-works/pi-tui";
 import { installCustomMessageCollapsePatch } from "./custom-message-collapse.js";
 import { installParentStamp } from "./parent-stamp.js";
 import { installSkillFlatPatch } from "./skill-flat.js";
 import { getState } from "./state.js";
+import { thinkingExpandShortcutIds } from "./thinking-keys.js";
 import { installThinkingPatch } from "./thinking-patch.js";
 import { installToolCollapsePatch } from "./tool-collapse.js";
 import { installToolViewCyclePatch } from "./tool-view-cycle.js";
@@ -124,19 +124,32 @@ export async function retainPatch(): Promise<() => Promise<void>> {
 export default function (pi: ExtensionAPI) {
   let degraded = false;
 
-  pi.registerShortcut(Key.alt("t"), {
-    description: "Toggle all thinking expand/collapse",
-    handler: async (ctx) => {
-      const state = getState();
-      state.globalExpanded = !state.globalExpanded;
-      if (ctx.hasUI) {
-        ctx.ui.notify(
-          state.globalExpanded ? "All thinking expanded" : "All thinking collapsed",
-          "info",
-        );
-      }
-    },
-  });
+  const toggleThinking = async (ctx: {
+    hasUI?: boolean;
+    ui?: { notify?: (msg: string, level?: string) => void };
+  }) => {
+    const state = getState();
+    state.globalExpanded = !state.globalExpanded;
+    // Force thinking rows to re-render (invalidate cached lines)
+    try {
+      // Session UI re-render; components re-read globalExpanded on next paint
+      ctx.ui?.notify?.(
+        state.globalExpanded ? "All thinking expanded" : "All thinking collapsed",
+        "info",
+      );
+    } catch {
+      /* ignore */
+    }
+  };
+
+  // Mac: Option+T types "†" unless Option is Meta — register both.
+  // Also Ctrl+Shift+T as a reliable fallback on all platforms.
+  for (const id of thinkingExpandShortcutIds()) {
+    pi.registerShortcut(id, {
+      description: "Toggle all thinking expand/collapse",
+      handler: toggleThinking,
+    });
+  }
 
   pi.on("session_start", async (_event, ctx) => {
     const state = getState();
