@@ -5,7 +5,7 @@
  *   dimmer body text, larger gaps between blocks
  */
 import { Text } from "@earendil-works/pi-tui";
-import { formatChromeLine, safeFg, type ChromeTheme } from "./chrome.js";
+import { bodyFg, formatChromeLine, safeFg, type ChromeTheme } from "./chrome.js";
 import { dimBodyTexts, stripBgDeep } from "./flat-style.js";
 import {
   importInternal,
@@ -296,7 +296,7 @@ function restyleExpanded(
 
       // Dim everything after the title line
       for (let i = 1; i < kids.length; i++) {
-        dimBodyTexts(kids[i], (t) => safeFg(theme, "dim", t), [TITLE_MARK]);
+        dimBodyTexts(kids[i], (t) => bodyFg(t), [TITLE_MARK]);
       }
     }
   } else {
@@ -308,7 +308,7 @@ function restyleExpanded(
       // Title + dim body if we can
       const plain = body.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
       self.contentText.setText(
-        `${titleLine}\n${plain ? safeFg(theme, "dim", plain) : ""}`,
+        `${titleLine}\n${plain ? bodyFg(plain) : ""}`,
       );
     } catch {
       /* ignore */

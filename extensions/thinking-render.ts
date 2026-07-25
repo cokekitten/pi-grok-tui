@@ -7,7 +7,7 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { formatChromeLine, safeFg, type ChromeTheme } from "./chrome.js";
+import { bodyFg, formatChromeLine, safeFg, type ChromeTheme } from "./chrome.js";
 import { getState } from "./state.js";
 
 export const MAX_VISIBLE_LINES = 3;
@@ -105,8 +105,7 @@ export class ThinkingScrollComponent {
 
     for (const l of visible) {
       // Body quieter than the Thinking... title
-      const dimmed =
-        l.trim() === "" ? "" : safeFg(this.theme, "dim", stripAnsiLocal(l));
+      const dimmed = l.trim() === "" ? "" : bodyFg(stripAnsiLocal(l));
       lines.push(truncateToWidth(dimmed ? `  ${dimmed}` : "", width, ""));
     }
 
@@ -126,8 +125,7 @@ export class ThinkingScrollComponent {
     });
     const body = rendered.map((l) => {
       if (l.trim() === "") return "";
-      const plain = stripAnsiLocal(l);
-      return `  ${safeFg(this.theme, "dim", plain)}`;
+      return `  ${bodyFg(stripAnsiLocal(l))}`;
     });
     return [truncateToWidth(header, width, ""), ...body];
   }
@@ -135,9 +133,7 @@ export class ThinkingScrollComponent {
   private thinkingDefaultStyle(dimBody = false) {
     return {
       color: (text: string) =>
-        dimBody
-          ? safeFg(this.theme, "dim", text)
-          : safeFg(this.theme, "thinkingText", text),
+        dimBody ? bodyFg(text) : safeFg(this.theme, "thinkingText", text),
       italic: true,
     };
   }

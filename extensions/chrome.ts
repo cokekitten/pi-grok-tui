@@ -24,6 +24,11 @@ export interface ChromeTheme {
 const STATUS_GREEN = "#4ade80";
 /** Clear red for failures. */
 const STATUS_RED = "#f87171";
+/**
+ * Expanded body text — quieter than theme `dim` (#666) and `muted` (#808).
+ * Titles stay on muted; body uses this so content sits further back.
+ */
+const BODY_FG = "#4a4a4a";
 
 function ansiFgHex(hex: string, text: string): string {
   const h = hex.replace("#", "");
@@ -47,6 +52,11 @@ export function safeFg(
   } catch {
     return text;
   }
+}
+
+/** Dimmer-than-title body/expanded content color. */
+export function bodyFg(text: string): string {
+  return ansiFgHex(BODY_FG, text);
 }
 
 export type ChromeKind =

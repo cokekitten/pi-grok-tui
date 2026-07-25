@@ -3,7 +3,7 @@
  * to a single Grok-style chrome line when tools are not expanded.
  */
 import { Text } from "@earendil-works/pi-tui";
-import { formatChromeLine, safeFg, type ChromeTheme } from "./chrome.js";
+import { bodyFg, formatChromeLine, type ChromeTheme } from "./chrome.js";
 import { dimBodyTexts, stripBgDeep } from "./flat-style.js";
 import {
   importInternal,
@@ -79,7 +79,7 @@ export async function installCustomMessageCollapsePatch(): Promise<() => void> {
         originalRebuild.call(this);
         try {
           stripBgDeep(this);
-          dimBodyTexts(this, (t) => safeFg(theme, "dim", t), []);
+          dimBodyTexts(this, (t) => bodyFg(t), []);
         } catch {
           /* ignore */
         }
