@@ -16,7 +16,11 @@ A [pi](https://github.com/earendil-works/pi-coding-agent) extension that densifi
 - Status diamonds: muted while running, green on success, red on failure.
 - Consecutive collapsible tools **merge** into a Grok-style header, e.g. `◇ Read 2 files` or `◇ Ran 1 command · 1 failed`.
 - **`edit` / `write` stay expanded** by default (full diff/content), matching Grok Build’s Edit policy.
-- Expand tool bodies with pi’s native **`Ctrl+O`**.
+- **`Ctrl+O` cycles three views:**
+  1. **compact** — one-line chrome (default)
+  2. **preview** — pi’s original truncated tool output
+  3. **full** — fully expanded tool output  
+  then back to compact.
 
 | Tool | Collapsed title example |
 |------|-------------------------|

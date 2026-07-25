@@ -13,6 +13,7 @@ import {
   INTERNAL_MODULES,
 } from "./internal-import.js";
 import { getPreviousSibling, getSiblings, shouldGapAfter } from "./parent-stamp.js";
+import { getToolViewMode } from "./state.js";
 import {
   formatCollapsedToolLabel,
   formatVerbGroupLabel,
@@ -55,6 +56,7 @@ interface ToolExecutionProto {
   hasRendererDefinition(): boolean;
   getRenderShell(): "default" | "self";
   updateDisplay(): void;
+  setExpanded?(expanded: boolean): void;
   removeChild?(c: unknown): void;
   addChild?(c: unknown): void;
 }
@@ -107,11 +109,16 @@ function isToolRunning(t: ToolExecutionProto): boolean {
 }
 
 /**
- * Collapsible tools (everything except edit/write) are title-only whenever
- * collapsed — including while running. Process/output is hidden until Ctrl+O.
+ * Collapsible tools are one-line chrome only in `chrome` tool-view mode.
+ * - chrome: one-line title (this)
+ * - truncated: pi default partial body (native updateDisplay, expanded=false)
+ * - full: native full body (expanded=true)
  */
 function isTitleOnlyCandidate(t: ToolExecutionProto): boolean {
-  return !t.expanded && isCollapsibleTool(t.toolName);
+  return (
+    getToolViewMode() === "chrome" &&
+    isCollapsibleTool(t.toolName)
+  );
 }
 
 /** Spacers (even zero-height) may sit between tools in chatContainer. */
@@ -305,13 +312,37 @@ export async function installToolCollapsePatch(): Promise<() => void> {
   const originalUpdateDisplay = prototype.updateDisplay;
   const refreshDepth = { n: 0 };
 
+  const originalSetExpanded = prototype.setExpanded as
+    | ((this: ToolExecutionProto, expanded: boolean) => void)
+    | undefined;
+
+  // Ensure setExpanded always refreshes display under the current view mode
+  if (typeof originalSetExpanded === "function") {
+    prototype.setExpanded = function (
+      this: ToolExecutionProto,
+      expanded: boolean,
+    ) {
+      this.expanded = expanded;
+      this.updateDisplay();
+    };
+  }
+
   const patchedUpdateDisplay = function (this: ToolExecutionProto) {
     try {
+      const mode = getToolViewMode();
       const titleOnly = isTitleOnlyCandidate(this);
 
       if (!titleOnly) {
         restoreNativeChrome(this);
         this.hideComponent = false;
+        // truncated: force expanded=false for pi's partial render
+        // full: force expanded=true
+        if (isCollapsibleTool(this.toolName)) {
+          const wantExpanded = mode === "full";
+          if (this.expanded !== wantExpanded) {
+            this.expanded = wantExpanded;
+          }
+        }
         return originalUpdateDisplay.call(this);
       }
 
@@ -397,5 +428,8 @@ export async function installToolCollapsePatch(): Promise<() => void> {
 
   return () => {
     prototype.updateDisplay = originalUpdateDisplay;
+    if (typeof originalSetExpanded === "function") {
+      prototype.setExpanded = originalSetExpanded;
+    }
   };
 }

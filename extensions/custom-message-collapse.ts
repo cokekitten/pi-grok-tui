@@ -9,6 +9,7 @@ import {
   PI_CODING_AGENT,
   INTERNAL_MODULES,
 } from "./internal-import.js";
+import { getToolViewMode } from "./state.js";
 
 interface CustomMessageProto {
   message: {
@@ -72,7 +73,8 @@ export async function installCustomMessageCollapsePatch(): Promise<() => void> {
 
   proto.rebuild = function (this: CustomMessageProto) {
     try {
-      if (this._expanded) {
+      // chrome → one-line; truncated/full → native custom body
+      if (this._expanded || getToolViewMode() !== "chrome") {
         return originalRebuild.call(this);
       }
 

@@ -21,6 +21,7 @@ import { installParentStamp } from "./parent-stamp.js";
 import { getState } from "./state.js";
 import { installThinkingPatch } from "./thinking-patch.js";
 import { installToolCollapsePatch } from "./tool-collapse.js";
+import { installToolViewCyclePatch } from "./tool-view-cycle.js";
 
 async function installPatch(): Promise<() => void> {
   // Parent stamp first so subsequent UI builds record siblings for spacing.
@@ -28,6 +29,7 @@ async function installPatch(): Promise<() => void> {
   const cleanupThinking = await installThinkingPatch();
   let cleanupTools: (() => void) | undefined;
   let cleanupCustom: (() => void) | undefined;
+  let cleanupCycle: (() => void) | undefined;
   try {
     cleanupTools = await installToolCollapsePatch();
   } catch (error) {
@@ -44,10 +46,19 @@ async function installPatch(): Promise<() => void> {
       error instanceof Error ? error.message : error,
     );
   }
+  try {
+    cleanupCycle = await installToolViewCyclePatch();
+  } catch (error) {
+    console.warn(
+      "thinking-scroll: tool view cycle patch failed:",
+      error instanceof Error ? error.message : error,
+    );
+  }
   return () => {
     cleanupThinking();
     cleanupTools?.();
     cleanupCustom?.();
+    cleanupCycle?.();
     cleanupStamp();
   };
 }
