@@ -1,12 +1,17 @@
 /**
  * Monkey-patch ToolExecutionComponent:
- * - Finished collapsible tools → compact Grok-style chrome row
- * - True green/red diamonds (not theme olive "success")
- * - Group consecutive collapsible tools
- * - edit/write always native expanded
+ * - chrome mode: one-line Grok titles + grouping
+ * - truncated/full: native body but NO success/error color blocks
+ * - status only via leading ◆ dots (same colors as chrome mode)
+ * - tight spacing between consecutive tools
  */
 import { Text } from "@earendil-works/pi-tui";
-import { formatChromeLine, type ChromeTheme } from "./chrome.js";
+import {
+  chromeGlyph,
+  colorGlyph,
+  formatChromeLine,
+  type ChromeTheme,
+} from "./chrome.js";
 import {
   importInternal,
   PI_CODING_AGENT,
@@ -40,14 +45,17 @@ interface ToolExecutionProto {
     setBgFn?(fn: (text: string) => string): void;
     paddingX?: number;
     paddingY?: number;
+    children?: unknown[];
   };
   contentText: {
     setText(t: string): void;
     setCustomBgFn?(fn: (text: string) => string): void;
+    text?: string;
   };
   selfRenderContainer: {
     clear(): void;
     addChild(c: unknown): void;
+    children?: unknown[];
   };
   imageComponents: unknown[];
   imageSpacers: unknown[];
@@ -60,6 +68,9 @@ interface ToolExecutionProto {
   removeChild?(c: unknown): void;
   addChild?(c: unknown): void;
 }
+
+const STATUS_DOT_MARK = "__piStatusDot";
+const passthrough = (t: string) => t;
 
 function isToolComponent(c: unknown): c is ToolExecutionProto {
   return (
@@ -81,7 +92,6 @@ function isSpacer(c: unknown): c is { lines: number; setLines?: (n: number) => v
 }
 
 function findParentChildren(self: ToolExecutionProto): unknown[] | null {
-  // Prefer parent stamp (reliable); fall back to walking TUI tree.
   const stamped = getSiblings(self);
   if (stamped) return stamped;
 
@@ -103,35 +113,25 @@ function findParentChildren(self: ToolExecutionProto): unknown[] | null {
   return walk(root);
 }
 
-/** Still streaming / not yet finalized. */
 function isToolRunning(t: ToolExecutionProto): boolean {
   return t.isPartial || t.result == null;
 }
 
-/**
- * Collapsible tools are one-line chrome only in `chrome` tool-view mode.
- * - chrome: one-line title (this)
- * - truncated: pi default partial body (native updateDisplay, expanded=false)
- * - full: native full body (expanded=true)
- */
-function isTitleOnlyCandidate(t: ToolExecutionProto): boolean {
-  return (
-    getToolViewMode() === "chrome" &&
-    isCollapsibleTool(t.toolName)
-  );
+function statusKind(t: ToolExecutionProto): "tool_run" | "tool_ok" | "tool_err" {
+  if (isToolRunning(t)) return "tool_run";
+  if (t.result?.isError === true) return "tool_err";
+  return "tool_ok";
 }
 
-/** Spacers (even zero-height) may sit between tools in chatContainer. */
+function isTitleOnlyCandidate(t: ToolExecutionProto): boolean {
+  return getToolViewMode() === "chrome" && isCollapsibleTool(t.toolName);
+}
+
 function isCrossableGap(c: unknown): boolean {
   if (isSpacer(c)) return true;
-  // Fully hidden tool rows still participate as members, not gaps.
   return false;
 }
 
-/**
- * Collect a maximal run of title-only tools around `self`, allowing Spacers
- * between them (strict adjacent-index grouping was too brittle).
- */
 function consecutiveGroup(self: ToolExecutionProto): {
   members: ToolExecutionProto[];
   isHeader: boolean;
@@ -211,19 +211,20 @@ function clearImages(self: ToolExecutionProto): void {
   }
 }
 
-function setCollapsedChrome(self: ToolExecutionProto, line: string): void {
-  // Leading spacer: gap after user prompt or assistant prose; none between tools.
+/** Leading blank only after user/prose — never between tool blocks. */
+function applyLeadSpacer(self: ToolExecutionProto): void {
   const lead = shouldGapAfter(getPreviousSibling(self)) ? 1 : 0;
-  if (Array.isArray(self.children)) {
-    for (const child of self.children) {
-      if (isSpacer(child)) {
-        if (typeof child.setLines === "function") child.setLines(lead);
-        else child.lines = lead;
-      }
+  if (!Array.isArray(self.children)) return;
+  for (const child of self.children) {
+    if (isSpacer(child)) {
+      if (typeof child.setLines === "function") child.setLines(lead);
+      else child.lines = lead;
     }
   }
+}
 
-  const passthrough = (t: string) => t;
+function setCollapsedChrome(self: ToolExecutionProto, line: string): void {
+  applyLeadSpacer(self);
 
   if (self.hasRendererDefinition()) {
     const shell = self.getRenderShell();
@@ -248,19 +249,55 @@ function setCollapsedChrome(self: ToolExecutionProto, line: string): void {
   }
 }
 
-function restoreNativeChrome(self: ToolExecutionProto): void {
-  if (Array.isArray(self.children)) {
-    for (const child of self.children) {
-      if (isSpacer(child)) {
-        if (typeof child.setLines === "function") child.setLines(1);
-        else child.lines = 1;
+/**
+ * After native updateDisplay (preview/full): strip color blocks, tighten padding,
+ * prepend status ◆ matching chrome mode.
+ */
+function stripExpandedChrome(self: ToolExecutionProto, theme: ThemeLike): void {
+  applyLeadSpacer(self);
+
+  const kind = statusKind(self);
+  const dot = colorGlyph(kind, chromeGlyph(kind), theme);
+
+  if (self.hasRendererDefinition()) {
+    const shell = self.getRenderShell();
+    const rc =
+      shell === "self" ? self.selfRenderContainer : self.contentBox;
+
+    if (rc && typeof (rc as { paddingY?: number }).paddingY === "number") {
+      (rc as { paddingX: number; paddingY: number }).paddingX = 0;
+      (rc as { paddingY: number; paddingY: number }).paddingY = 0;
+    }
+    if (typeof rc.setBgFn === "function") {
+      rc.setBgFn(passthrough);
+    }
+
+    // Prepend / refresh leading status diamond as first child of the body box
+    const kids = (rc as { children?: unknown[] }).children;
+    if (Array.isArray(kids)) {
+      while (kids.length > 0 && (kids[0] as { [STATUS_DOT_MARK]?: boolean })?.[STATUS_DOT_MARK]) {
+        kids.shift();
       }
+      const dotLine = new Text(`${dot}`, 0, 0) as any;
+      (dotLine as any)[STATUS_DOT_MARK] = true;
+      kids.unshift(dotLine);
+    }
+  } else {
+    if (typeof self.contentText.setCustomBgFn === "function") {
+      self.contentText.setCustomBgFn(passthrough);
+    }
+    // Best-effort: prefix plain text body with status dot
+    try {
+      const cur = (self.contentText as { text?: string }).text;
+      if (typeof cur === "string" && !cur.startsWith("◆") && !cur.startsWith("◇")) {
+        // Can't easily re-color without full restyle; leave body as-is
+      }
+    } catch {
+      /* ignore */
     }
   }
-  if (self.contentBox && typeof self.contentBox.paddingY === "number") {
-    self.contentBox.paddingX = 1;
-    self.contentBox.paddingY = 1;
-  }
+
+  self.hideComponent = false;
 }
 
 function refreshSiblings(
@@ -316,7 +353,6 @@ export async function installToolCollapsePatch(): Promise<() => void> {
     | ((this: ToolExecutionProto, expanded: boolean) => void)
     | undefined;
 
-  // Ensure setExpanded always refreshes display under the current view mode
   if (typeof originalSetExpanded === "function") {
     prototype.setExpanded = function (
       this: ToolExecutionProto,
@@ -332,20 +368,22 @@ export async function installToolCollapsePatch(): Promise<() => void> {
       const mode = getToolViewMode();
       const titleOnly = isTitleOnlyCandidate(this);
 
+      // ── preview / full (or non-collapsible edit/write): native body, flat chrome
       if (!titleOnly) {
-        restoreNativeChrome(this);
-        this.hideComponent = false;
-        // truncated: force expanded=false for pi's partial render
-        // full: force expanded=true
         if (isCollapsibleTool(this.toolName)) {
           const wantExpanded = mode === "full";
           if (this.expanded !== wantExpanded) {
             this.expanded = wantExpanded;
           }
         }
-        return originalUpdateDisplay.call(this);
+        this.hideComponent = false;
+        originalUpdateDisplay.call(this);
+        // Strip green/red blocks; status = leading ◆ only
+        stripExpandedChrome(this, theme);
+        return;
       }
 
+      // ── chrome mode: one-line titles + grouping
       clearImages(this);
 
       const { members, isHeader } = consecutiveGroup(this);
@@ -372,14 +410,12 @@ export async function installToolCollapsePatch(): Promise<() => void> {
 
       let line: string;
       if (members.length >= 2) {
-        // Grok group: hollow diamond + aggregated label; failed as red suffix
         const base = formatVerbGroupLabel(
           members.map((m) => ({
             toolName: m.toolName,
             isError: !isToolRunning(m) && m.result?.isError === true,
           })),
         );
-        // Strip trailing " · N failed" so we can color it separately
         const failedMatch = base.match(/^(.*?)( · \d+ failed)$/);
         const label = failedMatch ? failedMatch[1]! : base;
         const failedSuffix = failedMatch ? failedMatch[2]! : undefined;
@@ -408,9 +444,6 @@ export async function installToolCollapsePatch(): Promise<() => void> {
       setCollapsedChrome(this, line);
       refreshSiblings(this, members, refreshDepth);
     } catch {
-      // Never fall back to native updateDisplay for collapsible tools —
-      // native paints red error backgrounds / full process bodies, which
-      // flashes a red wall during /resume rebuild if anything throws.
       try {
         const fallback = `◆ ${this.toolName || "tool"}`;
         setCollapsedChrome(this, fallback);

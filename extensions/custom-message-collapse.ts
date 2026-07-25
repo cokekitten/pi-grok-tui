@@ -73,9 +73,29 @@ export async function installCustomMessageCollapsePatch(): Promise<() => void> {
 
   proto.rebuild = function (this: CustomMessageProto) {
     try {
-      // chrome → one-line; truncated/full → native custom body
+      // chrome → one-line; truncated/full → body without color block
       if (this._expanded || getToolViewMode() !== "chrome") {
-        return originalRebuild.call(this);
+        originalRebuild.call(this);
+        // Strip purple customMessageBg in preview/full
+        try {
+          const box = this.box as
+            | {
+                setBgFn?: (fn: (t: string) => string) => void;
+                paddingX?: number;
+                paddingY?: number;
+              }
+            | undefined;
+          if (box && typeof box.setBgFn === "function") {
+            box.setBgFn((t: string) => t);
+          }
+          if (box && typeof box.paddingY === "number") {
+            box.paddingX = 0;
+            box.paddingY = 0;
+          }
+        } catch {
+          /* ignore */
+        }
+        return;
       }
 
       // Clear whatever rebuild previously attached

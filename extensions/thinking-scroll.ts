@@ -18,6 +18,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
 import { installCustomMessageCollapsePatch } from "./custom-message-collapse.js";
 import { installParentStamp } from "./parent-stamp.js";
+import { installSkillFlatPatch } from "./skill-flat.js";
 import { getState } from "./state.js";
 import { installThinkingPatch } from "./thinking-patch.js";
 import { installToolCollapsePatch } from "./tool-collapse.js";
@@ -30,6 +31,7 @@ async function installPatch(): Promise<() => void> {
   let cleanupTools: (() => void) | undefined;
   let cleanupCustom: (() => void) | undefined;
   let cleanupCycle: (() => void) | undefined;
+  let cleanupSkill: (() => void) | undefined;
   try {
     cleanupTools = await installToolCollapsePatch();
   } catch (error) {
@@ -47,6 +49,14 @@ async function installPatch(): Promise<() => void> {
     );
   }
   try {
+    cleanupSkill = await installSkillFlatPatch();
+  } catch (error) {
+    console.warn(
+      "thinking-scroll: skill flat patch failed:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+  try {
     cleanupCycle = await installToolViewCyclePatch();
   } catch (error) {
     console.warn(
@@ -58,6 +68,7 @@ async function installPatch(): Promise<() => void> {
     cleanupThinking();
     cleanupTools?.();
     cleanupCustom?.();
+    cleanupSkill?.();
     cleanupCycle?.();
     cleanupStamp();
   };
