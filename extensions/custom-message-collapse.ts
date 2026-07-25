@@ -3,7 +3,8 @@
  * to a single Grok-style chrome line when tools are not expanded.
  */
 import { Text } from "@earendil-works/pi-tui";
-import { formatChromeLine, type ChromeTheme } from "./chrome.js";
+import { formatChromeLine, safeFg, type ChromeTheme } from "./chrome.js";
+import { dimBodyTexts, stripBgDeep } from "./flat-style.js";
 import {
   importInternal,
   PI_CODING_AGENT,
@@ -73,25 +74,12 @@ export async function installCustomMessageCollapsePatch(): Promise<() => void> {
 
   proto.rebuild = function (this: CustomMessageProto) {
     try {
-      // chrome → one-line; truncated/full → body without color block
+      // chrome → one-line; truncated/full → body without color block, dim text
       if (this._expanded || getToolViewMode() !== "chrome") {
         originalRebuild.call(this);
-        // Strip purple customMessageBg in preview/full
         try {
-          const box = this.box as
-            | {
-                setBgFn?: (fn: (t: string) => string) => void;
-                paddingX?: number;
-                paddingY?: number;
-              }
-            | undefined;
-          if (box && typeof box.setBgFn === "function") {
-            box.setBgFn((t: string) => t);
-          }
-          if (box && typeof box.paddingY === "number") {
-            box.paddingX = 0;
-            box.paddingY = 0;
-          }
+          stripBgDeep(this);
+          dimBodyTexts(this, (t) => safeFg(theme, "dim", t), []);
         } catch {
           /* ignore */
         }

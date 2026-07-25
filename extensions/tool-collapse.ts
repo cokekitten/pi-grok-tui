@@ -1,17 +1,12 @@
 /**
  * Monkey-patch ToolExecutionComponent:
- * - chrome mode: one-line Grok titles + grouping
- * - truncated/full: native body but NO success/error color blocks
- * - status only via leading ◆ dots (same colors as chrome mode)
- * - tight spacing between consecutive tools
+ * - chrome: one-line Grok titles + grouping
+ * - truncated/full: title row (◆ + label) + native body without color blocks,
+ *   dimmer body text, larger gaps between blocks
  */
 import { Text } from "@earendil-works/pi-tui";
-import {
-  chromeGlyph,
-  colorGlyph,
-  formatChromeLine,
-  type ChromeTheme,
-} from "./chrome.js";
+import { formatChromeLine, safeFg, type ChromeTheme } from "./chrome.js";
+import { dimBodyTexts, stripBgDeep } from "./flat-style.js";
 import {
   importInternal,
   PI_CODING_AGENT,
@@ -69,7 +64,7 @@ interface ToolExecutionProto {
   addChild?(c: unknown): void;
 }
 
-const STATUS_DOT_MARK = "__piStatusDot";
+const TITLE_MARK = "__piToolTitle";
 const passthrough = (t: string) => t;
 
 function isToolComponent(c: unknown): c is ToolExecutionProto {
@@ -117,19 +112,12 @@ function isToolRunning(t: ToolExecutionProto): boolean {
   return t.isPartial || t.result == null;
 }
 
-function statusKind(t: ToolExecutionProto): "tool_run" | "tool_ok" | "tool_err" {
-  if (isToolRunning(t)) return "tool_run";
-  if (t.result?.isError === true) return "tool_err";
-  return "tool_ok";
-}
-
 function isTitleOnlyCandidate(t: ToolExecutionProto): boolean {
   return getToolViewMode() === "chrome" && isCollapsibleTool(t.toolName);
 }
 
 function isCrossableGap(c: unknown): boolean {
-  if (isSpacer(c)) return true;
-  return false;
+  return isSpacer(c);
 }
 
 function consecutiveGroup(self: ToolExecutionProto): {
@@ -211,9 +199,20 @@ function clearImages(self: ToolExecutionProto): void {
   }
 }
 
-/** Leading blank only after user/prose — never between tool blocks. */
-function applyLeadSpacer(self: ToolExecutionProto): void {
-  const lead = shouldGapAfter(getPreviousSibling(self)) ? 1 : 0;
+/**
+ * Leading blank before a tool block.
+ * - chrome: tight between tools; gap after user/prose only
+ * - preview/full: always leave a blank when there is a previous sibling (more air)
+ */
+function applyLeadSpacer(self: ToolExecutionProto, roomy: boolean): void {
+  const prev = getPreviousSibling(self);
+  let lead = 0;
+  if (roomy) {
+    // Expanded views: breathing room between every block
+    lead = prev ? 1 : 0;
+  } else {
+    lead = shouldGapAfter(prev) ? 1 : 0;
+  }
   if (!Array.isArray(self.children)) return;
   for (const child of self.children) {
     if (isSpacer(child)) {
@@ -224,7 +223,7 @@ function applyLeadSpacer(self: ToolExecutionProto): void {
 }
 
 function setCollapsedChrome(self: ToolExecutionProto, line: string): void {
-  applyLeadSpacer(self);
+  applyLeadSpacer(self, false);
 
   if (self.hasRendererDefinition()) {
     const shell = self.getRenderShell();
@@ -250,48 +249,67 @@ function setCollapsedChrome(self: ToolExecutionProto, line: string): void {
 }
 
 /**
- * After native updateDisplay (preview/full): strip color blocks, tighten padding,
- * prepend status ◆ matching chrome mode.
+ * After native updateDisplay (preview/full):
+ * 1. strip all color blocks recursively
+ * 2. keep a title row: ◆ Label (Ctrl+O)  — same as chrome, on its own first line
+ * 3. dim body text under the title
+ * 4. roomier lead spacer between blocks
  */
-function stripExpandedChrome(self: ToolExecutionProto, theme: ThemeLike): void {
-  applyLeadSpacer(self);
+function restyleExpanded(
+  self: ToolExecutionProto,
+  theme: ThemeLike,
+): void {
+  applyLeadSpacer(self, true);
+  stripBgDeep(self);
 
-  const kind = statusKind(self);
-  const dot = colorGlyph(kind, chromeGlyph(kind), theme);
+  const isError = !isToolRunning(self) && self.result?.isError === true;
+  const isRunning = isToolRunning(self);
+  const kind = isRunning ? "tool_run" : isError ? "tool_err" : "tool_ok";
+  const label = formatCollapsedToolLabel(self.toolName, self.args, {
+    cwd: self.cwd,
+  });
+  const titleLine = formatChromeLine(theme, {
+    kind,
+    label,
+    hint: " (Ctrl+O)",
+  });
 
   if (self.hasRendererDefinition()) {
     const shell = self.getRenderShell();
     const rc =
       shell === "self" ? self.selfRenderContainer : self.contentBox;
 
-    if (rc && typeof (rc as { paddingY?: number }).paddingY === "number") {
-      (rc as { paddingX: number; paddingY: number }).paddingX = 0;
-      (rc as { paddingX: number; paddingY: number }).paddingY = 0;
-    }
-    if (typeof rc.setBgFn === "function") {
-      rc.setBgFn(passthrough);
-    }
+    stripBgDeep(rc);
 
-    // Prepend / refresh leading status diamond as first child of the body box
     const kids = (rc as { children?: unknown[] }).children;
     if (Array.isArray(kids)) {
-      while (kids.length > 0 && (kids[0] as { [STATUS_DOT_MARK]?: boolean })?.[STATUS_DOT_MARK]) {
+      // Drop previous title mark if re-rendering
+      while (
+        kids.length > 0 &&
+        (kids[0] as Record<string, unknown>)?.[TITLE_MARK]
+      ) {
         kids.shift();
       }
-      const dotLine = new Text(`${dot}`, 0, 0) as any;
-      (dotLine as any)[STATUS_DOT_MARK] = true;
-      kids.unshift(dotLine);
+      const title = new Text(titleLine, 0, 0) as any;
+      (title as any)[TITLE_MARK] = true;
+      kids.unshift(title);
+
+      // Dim everything after the title line
+      for (let i = 1; i < kids.length; i++) {
+        dimBodyTexts(kids[i], (t) => safeFg(theme, "dim", t), [TITLE_MARK]);
+      }
     }
   } else {
     if (typeof self.contentText.setCustomBgFn === "function") {
       self.contentText.setCustomBgFn(passthrough);
     }
-    // Best-effort: prefix plain text body with status dot
     try {
-      const cur = (self.contentText as { text?: string }).text;
-      if (typeof cur === "string" && !cur.startsWith("◆") && !cur.startsWith("◇")) {
-        // Can't easily re-color without full restyle; leave body as-is
-      }
+      const body = self.contentText.text ?? "";
+      // Title + dim body if we can
+      const plain = body.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+      self.contentText.setText(
+        `${titleLine}\n${plain ? safeFg(theme, "dim", plain) : ""}`,
+      );
     } catch {
       /* ignore */
     }
@@ -368,7 +386,7 @@ export async function installToolCollapsePatch(): Promise<() => void> {
       const mode = getToolViewMode();
       const titleOnly = isTitleOnlyCandidate(this);
 
-      // ── preview / full (or non-collapsible edit/write): native body, flat chrome
+      // ── preview / full: title + flat dim body (no color blocks)
       if (!titleOnly) {
         if (isCollapsibleTool(this.toolName)) {
           const wantExpanded = mode === "full";
@@ -378,8 +396,7 @@ export async function installToolCollapsePatch(): Promise<() => void> {
         }
         this.hideComponent = false;
         originalUpdateDisplay.call(this);
-        // Strip green/red blocks; status = leading ◆ only
-        stripExpandedChrome(this, theme);
+        restyleExpanded(this, theme);
         return;
       }
 

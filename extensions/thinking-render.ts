@@ -7,7 +7,7 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { formatChromeLine, type ChromeTheme } from "./chrome.js";
+import { formatChromeLine, safeFg, type ChromeTheme } from "./chrome.js";
 import { getState } from "./state.js";
 
 export const MAX_VISIBLE_LINES = 3;
@@ -15,6 +15,11 @@ export const MAX_VISIBLE_LINES = 3;
 export interface ThinkingThemeLike extends ChromeTheme {
   fg(color: string, text: string): string;
   bold(text: string): string;
+}
+
+function stripAnsiLocal(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
 }
 
 export class ThinkingScrollComponent {
@@ -87,6 +92,7 @@ export class ThinkingScrollComponent {
 
     const rendered = this.renderThinkingMarkdown(fullText, width - 2, {
       preserveLineBreaks: true,
+      dimBody: true,
     });
     const visible = rendered.slice(-MAX_VISIBLE_LINES);
 
@@ -98,14 +104,17 @@ export class ThinkingScrollComponent {
     lines.push(truncateToWidth(header, width, ""));
 
     for (const l of visible) {
-      lines.push(truncateToWidth(`  ${l}`, width, ""));
+      // Body quieter than the Thinking... title
+      const dimmed =
+        l.trim() === "" ? "" : safeFg(this.theme, "dim", stripAnsiLocal(l));
+      lines.push(truncateToWidth(dimmed ? `  ${dimmed}` : "", width, ""));
     }
 
     return lines;
   }
 
   private buildExpanded(fullText: string, width: number): string[] {
-    // Header row + body (Grok: diamond label, then content indented)
+    // Header row + dimmer body (title stays muted diamond chrome)
     const header = formatChromeLine(this.theme, {
       kind: "thinking",
       label: "Thought",
@@ -113,14 +122,22 @@ export class ThinkingScrollComponent {
     });
     const rendered = this.renderThinkingMarkdown(fullText, width - 2, {
       preserveLineBreaks: true,
+      dimBody: true,
     });
-    const body = rendered.map((l) => (l.trim() === "" ? "" : `  ${l}`));
+    const body = rendered.map((l) => {
+      if (l.trim() === "") return "";
+      const plain = stripAnsiLocal(l);
+      return `  ${safeFg(this.theme, "dim", plain)}`;
+    });
     return [truncateToWidth(header, width, ""), ...body];
   }
 
-  private thinkingDefaultStyle() {
+  private thinkingDefaultStyle(dimBody = false) {
     return {
-      color: (text: string) => this.theme.fg("thinkingText", text),
+      color: (text: string) =>
+        dimBody
+          ? safeFg(this.theme, "dim", text)
+          : safeFg(this.theme, "thinkingText", text),
       italic: true,
     };
   }
@@ -128,16 +145,21 @@ export class ThinkingScrollComponent {
   private renderThinkingMarkdown(
     text: string,
     width: number,
-    options?: { preserveLineBreaks?: boolean; maxSourceChars?: number },
+    options?: {
+      preserveLineBreaks?: boolean;
+      maxSourceChars?: number;
+      dimBody?: boolean;
+    },
   ): string[] {
     const preserveLineBreaks = options?.preserveLineBreaks ?? false;
     const maxSourceChars = options?.maxSourceChars;
+    const dimBody = options?.dimBody ?? false;
     let source = preserveLineBreaks ? text.replace(/\n/g, "  \n") : text;
     if (maxSourceChars !== undefined && source.length > maxSourceChars) {
       source = source.slice(0, maxSourceChars);
     }
 
-    const key = `${width}:${preserveLineBreaks ? 1 : 0}:${maxSourceChars ?? ""}:${source}`;
+    const key = `${width}:${preserveLineBreaks ? 1 : 0}:${dimBody ? 1 : 0}:${maxSourceChars ?? ""}:${source}`;
     if (this.cachedMarkdownKey === key && this.cachedMarkdownLines) {
       return this.cachedMarkdownLines;
     }
@@ -147,7 +169,7 @@ export class ThinkingScrollComponent {
       0,
       0,
       this.markdownTheme as any,
-      this.thinkingDefaultStyle(),
+      this.thinkingDefaultStyle(dimBody),
     );
     const lines = md.render(Math.max(1, width));
     this.cachedMarkdownKey = key;
