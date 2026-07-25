@@ -366,6 +366,8 @@ export async function installToolCollapsePatch(): Promise<() => void> {
 
   const originalUpdateDisplay = prototype.updateDisplay;
   const refreshDepth = { n: 0 };
+  /** Re-entrancy guard: ToolExecution.invalidate → updateDisplay must not nest. */
+  const updating = new WeakSet<object>();
 
   const originalSetExpanded = prototype.setExpanded as
     | ((this: ToolExecutionProto, expanded: boolean) => void)
@@ -382,6 +384,8 @@ export async function installToolCollapsePatch(): Promise<() => void> {
   }
 
   const patchedUpdateDisplay = function (this: ToolExecutionProto) {
+    if (updating.has(this)) return;
+    updating.add(this);
     try {
       const mode = getToolViewMode();
       const titleOnly = isTitleOnlyCandidate(this);
@@ -471,6 +475,8 @@ export async function installToolCollapsePatch(): Promise<() => void> {
           /* unrecoverable */
         }
       }
+    } finally {
+      updating.delete(this);
     }
   };
 

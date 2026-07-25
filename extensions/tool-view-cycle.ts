@@ -61,18 +61,20 @@ function applyToolViewMode(im: InteractiveModeLike, mode: ToolViewMode): void {
 
       const isTool = typeof child.toolName === "string";
       if (isTool) {
-        // full → expanded true; chrome/truncated → false (chrome uses title-only)
-        child.setExpanded?.(mode === "full");
+        // setExpanded already calls updateDisplay — do not call it again
         try {
-          child.updateDisplay?.();
+          child.setExpanded?.(mode === "full");
         } catch {
           /* ignore */
         }
       } else {
         // Custom messages: one-line only in chrome; preview/full show body
-        child.setExpanded?.(mode !== "chrome");
         try {
-          child.rebuild?.();
+          child.setExpanded?.(mode !== "chrome");
+          // setExpanded on custom already rebuilds; only rebuild if no setExpanded path
+          if (typeof child.setExpanded !== "function") {
+            child.rebuild?.();
+          }
         } catch {
           /* ignore */
         }
