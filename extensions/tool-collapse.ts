@@ -266,7 +266,7 @@ function stripExpandedChrome(self: ToolExecutionProto, theme: ThemeLike): void {
 
     if (rc && typeof (rc as { paddingY?: number }).paddingY === "number") {
       (rc as { paddingX: number; paddingY: number }).paddingX = 0;
-      (rc as { paddingY: number; paddingY: number }).paddingY = 0;
+      (rc as { paddingX: number; paddingY: number }).paddingY = 0;
     }
     if (typeof rc.setBgFn === "function") {
       rc.setBgFn(passthrough);
