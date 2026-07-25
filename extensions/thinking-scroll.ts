@@ -16,6 +16,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
+import { installCustomMessageCollapsePatch } from "./custom-message-collapse.js";
 import { installParentStamp } from "./parent-stamp.js";
 import { getState } from "./state.js";
 import { installThinkingPatch } from "./thinking-patch.js";
@@ -26,18 +27,27 @@ async function installPatch(): Promise<() => void> {
   const cleanupStamp = installParentStamp();
   const cleanupThinking = await installThinkingPatch();
   let cleanupTools: (() => void) | undefined;
+  let cleanupCustom: (() => void) | undefined;
   try {
     cleanupTools = await installToolCollapsePatch();
   } catch (error) {
-    // Tools patch is best-effort; thinking still works.
     console.warn(
       "thinking-scroll: tool collapse patch failed:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+  try {
+    cleanupCustom = await installCustomMessageCollapsePatch();
+  } catch (error) {
+    console.warn(
+      "thinking-scroll: custom message collapse patch failed:",
       error instanceof Error ? error.message : error,
     );
   }
   return () => {
     cleanupThinking();
     cleanupTools?.();
+    cleanupCustom?.();
     cleanupStamp();
   };
 }

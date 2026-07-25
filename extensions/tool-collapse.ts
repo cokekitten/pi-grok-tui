@@ -114,6 +114,17 @@ function isTitleOnlyCandidate(t: ToolExecutionProto): boolean {
   return !t.expanded && isCollapsibleTool(t.toolName);
 }
 
+/** Spacers (even zero-height) may sit between tools in chatContainer. */
+function isCrossableGap(c: unknown): boolean {
+  if (isSpacer(c)) return true;
+  // Fully hidden tool rows still participate as members, not gaps.
+  return false;
+}
+
+/**
+ * Collect a maximal run of title-only tools around `self`, allowing Spacers
+ * between them (strict adjacent-index grouping was too brittle).
+ */
 function consecutiveGroup(self: ToolExecutionProto): {
   members: ToolExecutionProto[];
   isHeader: boolean;
@@ -123,36 +134,47 @@ function consecutiveGroup(self: ToolExecutionProto): {
     return { members: [self], isHeader: true };
   }
 
-  const tools = siblings
-    .map((c, i) => ({ c, i }))
-    .filter((x): x is { c: ToolExecutionProto; i: number } => isToolComponent(x.c));
-
-  const selfIdx = tools.findIndex((x) => x.c === self);
+  const selfIdx = siblings.indexOf(self);
   if (selfIdx < 0) {
     return { members: [self], isHeader: true };
   }
 
   let start = selfIdx;
-  let end = selfIdx;
-  while (
-    start > 0 &&
-    tools[start].i === tools[start - 1].i + 1 &&
-    isTitleOnlyCandidate(tools[start - 1].c)
-  ) {
-    start -= 1;
-  }
-  while (
-    end + 1 < tools.length &&
-    tools[end + 1].i === tools[end].i + 1 &&
-    isTitleOnlyCandidate(tools[end + 1].c)
-  ) {
-    end += 1;
+  while (start > 0) {
+    const prev = siblings[start - 1];
+    if (isCrossableGap(prev)) {
+      start -= 1;
+      continue;
+    }
+    if (isToolComponent(prev) && isTitleOnlyCandidate(prev)) {
+      start -= 1;
+      continue;
+    }
+    break;
   }
 
-  const members = tools
-    .slice(start, end + 1)
-    .map((x) => x.c)
-    .filter(isTitleOnlyCandidate);
+  let end = selfIdx;
+  while (end + 1 < siblings.length) {
+    const next = siblings[end + 1];
+    if (isCrossableGap(next)) {
+      end += 1;
+      continue;
+    }
+    if (isToolComponent(next) && isTitleOnlyCandidate(next)) {
+      end += 1;
+      continue;
+    }
+    break;
+  }
+
+  const members: ToolExecutionProto[] = [];
+  for (let i = start; i <= end; i++) {
+    const c = siblings[i];
+    if (isToolComponent(c) && isTitleOnlyCandidate(c)) {
+      members.push(c);
+    }
+  }
+
   if (members.length === 0) {
     return { members: [self], isHeader: true };
   }

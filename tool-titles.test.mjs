@@ -103,9 +103,19 @@ describe("verbKindForTool + formatVerbGroupLabel", () => {
     assert.equal(verbKindForTool("bash"), "command");
     assert.equal(verbKindForTool("grep"), "search");
     assert.equal(verbKindForTool("ls"), "dir");
+    assert.equal(verbKindForTool("todo"), "todo");
+    assert.equal(verbKindForTool("TodoWrite"), "todo");
   });
 
   it("formats multi-tool group like Grok", () => {
+    assert.equal(
+      formatVerbGroupLabel([
+        { toolName: "todo" },
+        { toolName: "todo" },
+        { toolName: "todo" },
+      ]),
+      "Updated 3 todos",
+    );
     assert.equal(
       formatVerbGroupLabel([
         { toolName: "read" },

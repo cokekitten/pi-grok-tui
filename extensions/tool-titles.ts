@@ -16,6 +16,7 @@ export type VerbKind =
   | "web_fetch"
   | "web_search"
   | "command"
+  | "todo"
   | "mcp"
   | "other";
 
@@ -87,7 +88,8 @@ function titleCaseToolName(name: string): string {
 
 /** Map pi tool name → Grok-like verb bucket. */
 export function verbKindForTool(toolName: string): VerbKind {
-  switch (toolName) {
+  const n = toolName.toLowerCase();
+  switch (n) {
     case "read":
       return "file";
     case "grep":
@@ -97,14 +99,21 @@ export function verbKindForTool(toolName: string): VerbKind {
       return "dir";
     case "bash":
       return "command";
+    case "todo":
+    case "todowrite":
+    case "todo_write":
+    case "update_todo":
+    case "updatetodo":
+      return "todo";
     case "web_search":
-    case "WebSearch":
+    case "websearch":
       return "web_search";
     case "web_fetch":
-    case "WebFetch":
+    case "webfetch":
       return "web_fetch";
     default:
-      if (toolName.includes("__") || toolName.startsWith("mcp")) return "mcp";
+      if (n.includes("todo")) return "todo";
+      if (toolName.includes("__") || n.startsWith("mcp")) return "mcp";
       // use_tool / integration names often look like ServerTool
       if (/^[A-Z]/.test(toolName) || toolName.includes(" ")) return "mcp";
       return "other";
@@ -125,6 +134,8 @@ function verbPast(kind: VerbKind): string {
       return "Searched";
     case "command":
       return "Ran";
+    case "todo":
+      return "Updated";
     case "mcp":
       return "Called";
     case "other":
@@ -140,6 +151,7 @@ function noun(kind: VerbKind, count: number): string {
     web_fetch: ["website", "websites"],
     web_search: ["website", "websites"],
     command: ["command", "commands"],
+    todo: ["todo", "todos"],
     mcp: ["MCP tool", "MCP tools"],
     other: ["tool", "tools"],
   };
@@ -219,7 +231,22 @@ export function formatToolTitle(
       const path = str(a.path) ?? ".";
       return `List \`${truncateChars(path, 48)}\``;
     }
+    case "todo":
+    case "todowrite":
+    case "todo_write":
+    case "TodoWrite": {
+      // Prefer a short subject from args when present
+      const subject =
+        str(a.subject) ??
+        str(a.title) ??
+        str(a.content) ??
+        (Array.isArray(a.todos) ? `${a.todos.length} items` : undefined);
+      return subject ? `Todo \`${truncateChars(subject, 48)}\`` : "Todo";
+    }
     default: {
+      if (name.toLowerCase().includes("todo")) {
+        return "Todo";
+      }
       const label = titleCaseToolName(name);
       const preview =
         str(a.path) ??

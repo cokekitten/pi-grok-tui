@@ -33,5 +33,6 @@ export const INTERNAL_MODULES = {
   assistantMessageComponent:
     "dist/modes/interactive/components/assistant-message.js",
   toolExecution: "dist/modes/interactive/components/tool-execution.js",
+  customMessage: "dist/modes/interactive/components/custom-message.js",
   theme: "dist/modes/interactive/theme/theme.js",
 } as const;
