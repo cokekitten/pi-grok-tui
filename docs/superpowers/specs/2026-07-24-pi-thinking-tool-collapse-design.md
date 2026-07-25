@@ -1,7 +1,7 @@
 # Design: Compact thinking title + collapsed tool titles
 
 **Date:** 2026-07-24  
-**Repo:** `pi-thinking-scroll`  
+**Repo:** `pi-grok-tui`  
 **Status:** Approved for planning  
 
 ## Goal
@@ -38,7 +38,7 @@ Display-only. Do not change session files, model requests/responses, context con
 
 ## Current baseline
 
-### This plugin (`thinking-scroll.ts`)
+### This plugin (`grok-tui.ts`)
 
 - Monkey-patches `AssistantMessageComponent.prototype.updateContent`.
 - Live thinking: up to **5** lines + spinner.
@@ -122,7 +122,7 @@ Extend the existing extension with additional display patches. Keep one entrypoi
 
 ```
 extensions/
-  thinking-scroll.ts    # entry: shortcuts, events, retain/release patches
+  grok-tui.ts    # entry: shortcuts, events, retain/release patches
   thinking-render.ts    # ThinkingScrollComponent + collapsed title row
   tool-collapse.ts      # patch ToolExecutionComponent display path
   tool-titles.ts        # pure functions: name + args + cwd → title string

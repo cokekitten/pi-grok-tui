@@ -1,11 +1,18 @@
 /**
  * Monkey-patch ToolExecutionComponent:
  * - chrome: one-line Grok titles + grouping
- * - truncated/full: title row (◆ + label) + native body without color blocks,
- *   dimmer body text, larger gaps between blocks
+ * - truncated/full: strip background blocks only; collapsible tools get a ◆ title
+ *   and quieter body; edit/write keep native syntax/diff highlighting
  */
 import { Text } from "@earendil-works/pi-tui";
-import { bodyFg, formatChromeLine, safeFg, type ChromeTheme } from "./chrome.js";
+import {
+  bodyFg,
+  formatChromeLine,
+  RESPONSE_LEFT_PAD,
+  responsePadString,
+  safeFg,
+  type ChromeTheme,
+} from "./chrome.js";
 import { dimBodyTexts, stripBgDeep } from "./flat-style.js";
 import {
   importInternal,
@@ -222,6 +229,16 @@ function applyLeadSpacer(self: ToolExecutionProto, roomy: boolean): void {
   }
 }
 
+function applyHorizontalPad(
+  renderContainer: { paddingX?: number; paddingY?: number },
+): void {
+  // Vertical pad off (own lead Spacer); horizontal pad aligns with user ❯.
+  if (typeof renderContainer.paddingY === "number") {
+    renderContainer.paddingX = RESPONSE_LEFT_PAD;
+    renderContainer.paddingY = 0;
+  }
+}
+
 function setCollapsedChrome(self: ToolExecutionProto, line: string): void {
   applyLeadSpacer(self, false);
 
@@ -229,10 +246,7 @@ function setCollapsedChrome(self: ToolExecutionProto, line: string): void {
     const shell = self.getRenderShell();
     const renderContainer =
       shell === "self" ? self.selfRenderContainer : self.contentBox;
-    if (renderContainer && typeof (renderContainer as any).paddingY === "number") {
-      (renderContainer as { paddingX: number; paddingY: number }).paddingX = 0;
-      (renderContainer as { paddingX: number; paddingY: number }).paddingY = 0;
-    }
+    applyHorizontalPad(renderContainer as { paddingX?: number; paddingY?: number });
     if (typeof renderContainer.setBgFn === "function") {
       renderContainer.setBgFn(passthrough);
     }
@@ -243,16 +257,17 @@ function setCollapsedChrome(self: ToolExecutionProto, line: string): void {
     if (typeof self.contentText.setCustomBgFn === "function") {
       self.contentText.setCustomBgFn(passthrough);
     }
-    self.contentText.setText(line);
+    // No Box padding path — bake indent into the text.
+    self.contentText.setText(responsePadString() + line);
     self.hideComponent = false;
   }
 }
 
 /**
  * After native updateDisplay (preview/full):
- * 1. strip all color blocks recursively
- * 2. keep a title row: ◆ Label (Ctrl+O)  — same as chrome, on its own first line
- * 3. dim body text under the title
+ * 1. strip background color blocks only (keep fg / syntax / diff highlights)
+ * 2. for collapsible tools: add ◆ title row and optionally quiet non-code body
+ * 3. edit/write keep native body styling (diff greens/reds, syntax) — only bg goes
  * 4. roomier lead spacer between blocks
  */
 function restyleExpanded(
@@ -261,6 +276,10 @@ function restyleExpanded(
 ): void {
   applyLeadSpacer(self, true);
   stripBgDeep(self);
+
+  // edit/write are always-expanded Grok-style: native renderer owns the body
+  // (syntax + diff highlights). We only remove toolSuccessBg/errorBg blocks.
+  const preserveNativeBody = !isCollapsibleTool(self.toolName);
 
   const isError = !isToolRunning(self) && self.result?.isError === true;
   const isRunning = isToolRunning(self);
@@ -279,7 +298,17 @@ function restyleExpanded(
     const rc =
       shell === "self" ? self.selfRenderContainer : self.contentBox;
 
+    // Vertical pad off (lead Spacer owns gaps); horizontal pad matches ❯ column.
+    // stripBgDeep may zero pad — re-apply after.
     stripBgDeep(rc);
+    applyHorizontalPad(rc as { paddingX?: number; paddingY?: number });
+
+    if (preserveNativeBody) {
+      // Do not inject chrome title over native "edit path" / do not dimBody —
+      // that would strip ANSI diff/syntax colors.
+      self.hideComponent = false;
+      return;
+    }
 
     const kids = (rc as { children?: unknown[] }).children;
     if (Array.isArray(kids)) {
@@ -294,7 +323,7 @@ function restyleExpanded(
       (title as any)[TITLE_MARK] = true;
       kids.unshift(title);
 
-      // Dim everything after the title line
+      // Quiet bash/read/etc body for flat look (not edit/write).
       for (let i = 1; i < kids.length; i++) {
         dimBodyTexts(kids[i], (t) => bodyFg(t), [TITLE_MARK]);
       }
@@ -303,15 +332,39 @@ function restyleExpanded(
     if (typeof self.contentText.setCustomBgFn === "function") {
       self.contentText.setCustomBgFn(passthrough);
     }
-    try {
-      const body = self.contentText.text ?? "";
-      // Title + dim body if we can
-      const plain = body.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
-      self.contentText.setText(
-        `${titleLine}\n${plain ? bodyFg(plain) : ""}`,
-      );
-    } catch {
-      /* ignore */
+    const sp = responsePadString();
+    if (!preserveNativeBody) {
+      try {
+        const body = self.contentText.text ?? "";
+        // Title + dim body if we can
+        const plain = body.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+        const bodyLines = plain
+          ? plain
+              .split("\n")
+              .map((l) => sp + bodyFg(l))
+              .join("\n")
+          : "";
+        self.contentText.setText(
+          `${sp}${titleLine}${bodyLines ? `\n${bodyLines}` : ""}`,
+        );
+      } catch {
+        /* ignore */
+      }
+    } else {
+      // Preserve native colors but still indent.
+      try {
+        const body = self.contentText.text ?? "";
+        if (body && !body.startsWith(sp)) {
+          self.contentText.setText(
+            body
+              .split("\n")
+              .map((l) => sp + l)
+              .join("\n"),
+          );
+        }
+      } catch {
+        /* ignore */
+      }
     }
   }
 
@@ -353,7 +406,7 @@ export async function installToolCollapsePatch(): Promise<() => void> {
   ]);
 
   if (!rawTec || (typeof rawTec !== "function" && typeof rawTec !== "object")) {
-    throw new Error("thinking-scroll: ToolExecutionComponent missing");
+    throw new Error("pi-grok-tui: ToolExecutionComponent missing");
   }
 
   const Tec = rawTec as { prototype: ToolExecutionProto };
@@ -361,7 +414,7 @@ export async function installToolCollapsePatch(): Promise<() => void> {
   const theme = rawTheme as ThemeLike;
 
   if (typeof prototype.updateDisplay !== "function") {
-    throw new Error("thinking-scroll: ToolExecutionComponent.updateDisplay missing");
+    throw new Error("pi-grok-tui: ToolExecutionComponent.updateDisplay missing");
   }
 
   const originalUpdateDisplay = prototype.updateDisplay;

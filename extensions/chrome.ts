@@ -30,14 +30,32 @@ const STATUS_RED = "#f87171";
  */
 const BODY_FG = "#4a4a4a";
 
-function ansiFgHex(hex: string, text: string): string {
+function parseHexRgb(hex: string): { r: number; g: number; b: number } | null {
   const h = hex.replace("#", "");
-  if (h.length !== 6) return text;
+  if (h.length !== 6) return null;
   const r = parseInt(h.slice(0, 2), 16);
   const g = parseInt(h.slice(2, 4), 16);
   const b = parseInt(h.slice(4, 6), 16);
-  if ([r, g, b].some((n) => Number.isNaN(n))) return text;
-  return `\x1b[38;2;${r};${g};${b}m${text}\x1b[39m`;
+  if ([r, g, b].some((n) => Number.isNaN(n))) return null;
+  return { r, g, b };
+}
+
+/** Truecolor foreground. */
+export function ansiFgHex(hex: string, text: string): string {
+  const rgb = parseHexRgb(hex);
+  if (!rgb) return text;
+  return `\x1b[38;2;${rgb.r};${rgb.g};${rgb.b}m${text}\x1b[39m`;
+}
+
+/**
+ * Truecolor background applied per character (keeps existing fg ANSI).
+ * Used for user-message blocks where we override theme.bg tokens.
+ */
+export function ansiBgHex(hex: string, text: string): string {
+  const rgb = parseHexRgb(hex);
+  if (!rgb) return text;
+  // Reset bg at end; leave fg as-is for nested styles inside the line.
+  return `\x1b[48;2;${rgb.r};${rgb.g};${rgb.b}m${text}\x1b[49m`;
 }
 
 /** Safe theme.fg — never throws. */
@@ -57,6 +75,24 @@ export function safeFg(
 /** Dimmer-than-title body/expanded content color. */
 export function bodyFg(text: string): string {
   return ansiFgHex(BODY_FG, text);
+}
+
+/**
+ * Left indent for assistant / tool / thinking rows so they line up with the
+ * user-message ❯ column (user bubble uses outputPad + "❯ ").
+ * 2 cells ≈ arrow + space; keeps response chrome off the terminal gutter.
+ */
+export const RESPONSE_LEFT_PAD = 2;
+
+/** Prefix every line with RESPONSE_LEFT_PAD spaces (ANSI-safe: spaces first). */
+export function indentResponseLines(lines: string[], pad = RESPONSE_LEFT_PAD): string[] {
+  if (pad <= 0 || lines.length === 0) return lines;
+  const sp = " ".repeat(pad);
+  return lines.map((line) => sp + line);
+}
+
+export function responsePadString(pad = RESPONSE_LEFT_PAD): string {
+  return pad > 0 ? " ".repeat(pad) : "";
 }
 
 export type ChromeKind =

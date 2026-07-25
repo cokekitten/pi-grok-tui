@@ -1,8 +1,11 @@
 /**
- * Shared helpers: strip background color blocks, zero padding, dim body text.
+ * Shared helpers: strip background color blocks, zero vertical padding, dim body text.
  *
  * IMPORTANT: never call node.invalidate() on ToolExecutionComponent — its
  * invalidate() re-enters updateDisplay and will infinite-loop with stripBgDeep.
+ *
+ * Horizontal padding is left alone here so callers can set RESPONSE_LEFT_PAD
+ * on outer shells; we only force paddingY=0 to avoid double vertical gaps.
  */
 
 const passthrough = (t: string) => t;
@@ -64,8 +67,8 @@ export function stripBgDeep(node: unknown, depth = 0): void {
     else if ("bgFn" in n) n.bgFn = passthrough;
     if (typeof n.setCustomBgFn === "function") n.setCustomBgFn(passthrough);
     else if ("customBgFn" in n) n.customBgFn = passthrough;
+    // Only clear vertical pad — horizontal indent is owned by response layout.
     if (typeof n.paddingY === "number") {
-      n.paddingX = 0;
       n.paddingY = 0;
     }
     clearRenderCache(n);

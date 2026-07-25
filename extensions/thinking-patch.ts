@@ -8,7 +8,7 @@ import {
   INTERNAL_MODULES,
 } from "./internal-import.js";
 import { getPreviousSibling, shouldGapAfter } from "./parent-stamp.js";
-import { safeFg } from "./chrome.js";
+import { RESPONSE_LEFT_PAD, safeFg } from "./chrome.js";
 import { ThinkingScrollComponent, type ThinkingThemeLike } from "./thinking-render.js";
 
 interface ContentBlock {
@@ -56,7 +56,7 @@ export async function installThinkingPatch(): Promise<() => void> {
   ]);
 
   if (!rawAmc || (typeof rawAmc !== "function" && typeof rawAmc !== "object")) {
-    throw new Error("thinking-scroll: AssistantMessageComponent missing");
+    throw new Error("pi-grok-tui: AssistantMessageComponent missing");
   }
 
   const Amc = rawAmc as { prototype: AssistantMessageComponentProto };
@@ -64,7 +64,7 @@ export async function installThinkingPatch(): Promise<() => void> {
   const uiTheme = rawTheme as ThinkingThemeLike;
 
   if (typeof prototype.updateContent !== "function") {
-    throw new Error("thinking-scroll: updateContent not found");
+    throw new Error("pi-grok-tui: updateContent not found");
   }
 
   const originalUpdateContent = prototype.updateContent;
@@ -139,12 +139,20 @@ export async function installThinkingPatch(): Promise<() => void> {
             c.type === "text" && (c.text || "").trim().length > 0 && i < lastThinkingIndex,
         );
 
+      // Match user-message ❯ column (see RESPONSE_LEFT_PAD).
+      const padX = RESPONSE_LEFT_PAD;
+
       for (const block of message.content) {
         if (block.type === "text" && (block.text || "").trim().length > 0) {
           // Blank line before body when it follows thinking in this message
           // (hasTextAfterThinking path adds spacer after thinking instead).
           this.contentContainer.addChild(
-            new Markdown((block.text || "").trim(), 0, 0, this.markdownTheme as any),
+            new Markdown(
+              (block.text || "").trim(),
+              padX,
+              0,
+              this.markdownTheme as any,
+            ),
           );
           continue;
         }
@@ -184,13 +192,13 @@ export async function installThinkingPatch(): Promise<() => void> {
           const msg = raw.split("\n")[0]!.slice(0, 200);
           this.contentContainer.addChild(new Spacer(1));
           this.contentContainer.addChild(
-            new Text(safeFg(uiTheme, "error", msg), 0, 0) as any,
+            new Text(safeFg(uiTheme, "error", msg), padX, 0) as any,
           );
         } else if (message.stopReason === "error") {
           const raw = (message.errorMessage || "Unknown").split("\n")[0]!.slice(0, 200);
           this.contentContainer.addChild(new Spacer(1));
           this.contentContainer.addChild(
-            new Text(safeFg(uiTheme, "error", `Error: ${raw}`), 0, 0) as any,
+            new Text(safeFg(uiTheme, "error", `Error: ${raw}`), padX, 0) as any,
           );
         } else if (message.stopReason === "length") {
           this.contentContainer.addChild(new Spacer(1));
@@ -201,7 +209,7 @@ export async function installThinkingPatch(): Promise<() => void> {
                 "error",
                 "Error: hit max output tokens (response may be incomplete)",
               ),
-              0,
+              padX,
               0,
             ) as any,
           );

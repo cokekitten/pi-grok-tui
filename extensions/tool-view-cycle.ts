@@ -44,6 +44,45 @@ function isExpandable(c: unknown): c is Expandable {
   );
 }
 
+interface Relayoutable {
+  toolName?: string;
+  lastMessage?: unknown;
+  updateContent?: (msg: unknown) => void;
+  setExpanded?: (expanded: boolean) => void;
+  updateDisplay?: () => void;
+  rebuild?: () => void;
+  contentContainer?: unknown;
+}
+
+function isRelayoutable(c: unknown): c is Relayoutable {
+  return !!c && typeof c === "object";
+}
+
+/**
+ * Recompute Thought/assistant lead spacers after tool expand/collapse.
+ * Lead gap depends on whether the previous tool shows a body (non-chrome).
+ */
+function relayoutAssistantMessages(im: InteractiveModeLike): void {
+  const children = im.chatContainer?.children;
+  if (!children) return;
+  for (const child of children) {
+    if (!isRelayoutable(child)) continue;
+    // Skip tools — already refreshed via setExpanded → updateDisplay
+    if (typeof child.toolName === "string") continue;
+    if (
+      typeof child.updateContent === "function" &&
+      child.lastMessage != null &&
+      child.contentContainer != null
+    ) {
+      try {
+        child.updateContent(child.lastMessage);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
 function applyToolViewMode(im: InteractiveModeLike, mode: ToolViewMode): void {
   // Keep pi's boolean roughly in sync for newly created components.
   im.toolOutputExpanded = mode === "full";
@@ -82,6 +121,11 @@ function applyToolViewMode(im: InteractiveModeLike, mode: ToolViewMode): void {
     }
   }
 
+  // Thought rows keep a lead Spacer based on prev tool body visibility.
+  // Without this, Ctrl+O leaves Thought stuck to expanded tool output
+  // (or leaves a stale blank after collapsing back to chrome).
+  relayoutAssistantMessages(im);
+
   try {
     im.ui?.requestRender?.();
   } catch {
@@ -99,7 +143,7 @@ export async function installToolViewCyclePatch(): Promise<() => void> {
     | { prototype: InteractiveModeLike }
     | undefined;
   if (!IM?.prototype) {
-    throw new Error("thinking-scroll: InteractiveMode missing");
+    throw new Error("pi-grok-tui: InteractiveMode missing");
   }
 
   const proto = IM.prototype;
@@ -107,7 +151,7 @@ export async function installToolViewCyclePatch(): Promise<() => void> {
   const originalSet = proto.setToolsExpanded;
 
   if (typeof originalToggle !== "function" || typeof originalSet !== "function") {
-    throw new Error("thinking-scroll: expand toggle methods missing");
+    throw new Error("pi-grok-tui: expand toggle methods missing");
   }
 
   proto.toggleToolOutputExpansion = function (this: InteractiveModeLike) {

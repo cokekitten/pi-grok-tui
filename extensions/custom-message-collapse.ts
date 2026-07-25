@@ -3,7 +3,12 @@
  * to a single Grok-style chrome line when tools are not expanded.
  */
 import { Text } from "@earendil-works/pi-tui";
-import { bodyFg, formatChromeLine, type ChromeTheme } from "./chrome.js";
+import {
+  bodyFg,
+  formatChromeLine,
+  RESPONSE_LEFT_PAD,
+  type ChromeTheme,
+} from "./chrome.js";
 import { dimBodyTexts, stripBgDeep } from "./flat-style.js";
 import {
   importInternal,
@@ -59,7 +64,7 @@ export async function installCustomMessageCollapsePatch(): Promise<() => void> {
   ]);
 
   if (!raw || (typeof raw !== "function" && typeof raw !== "object")) {
-    throw new Error("thinking-scroll: CustomMessageComponent missing");
+    throw new Error("pi-grok-tui: CustomMessageComponent missing");
   }
 
   const Ctor = raw as { prototype: CustomMessageProto };
@@ -67,7 +72,7 @@ export async function installCustomMessageCollapsePatch(): Promise<() => void> {
   const theme = rawTheme as ChromeTheme;
 
   if (typeof proto.rebuild !== "function") {
-    throw new Error("thinking-scroll: CustomMessageComponent.rebuild missing");
+    throw new Error("pi-grok-tui: CustomMessageComponent.rebuild missing");
   }
 
   const originalRebuild = proto.rebuild;
@@ -105,7 +110,7 @@ export async function installCustomMessageCollapsePatch(): Promise<() => void> {
         label,
         hint: " (Ctrl+O)",
       });
-      this.addChild(new Text(line, 0, 0) as any);
+      this.addChild(new Text(line, RESPONSE_LEFT_PAD, 0) as any);
     } catch {
       try {
         originalRebuild.call(this);

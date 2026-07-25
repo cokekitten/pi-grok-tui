@@ -7,7 +7,14 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { bodyFg, formatChromeLine, safeFg, type ChromeTheme } from "./chrome.js";
+import {
+  bodyFg,
+  formatChromeLine,
+  indentResponseLines,
+  RESPONSE_LEFT_PAD,
+  safeFg,
+  type ChromeTheme,
+} from "./chrome.js";
 import { getState } from "./state.js";
 import { THINKING_EXPAND_HINT } from "./thinking-keys.js";
 
@@ -46,6 +53,8 @@ export class ThinkingScrollComponent {
     const isExpanded = state.globalExpanded;
     const isActive = state.activeByTimestamp.has(this.messageTimestamp);
     const fullText = this.thinkingBlocks.map((b) => b.text).join("\n");
+    const pad = RESPONSE_LEFT_PAD;
+    const innerWidth = Math.max(1, width - pad);
 
     if (
       !isActive &&
@@ -65,13 +74,14 @@ export class ThinkingScrollComponent {
 
     let lines: string[];
     if (isActive) {
-      lines = this.buildActive(fullText, width);
+      lines = this.buildActive(fullText, innerWidth);
     } else if (isExpanded) {
-      lines = this.buildExpanded(fullText, width);
+      lines = this.buildExpanded(fullText, innerWidth);
     } else {
-      lines = this.buildFinishedTitle(width);
+      lines = this.buildFinishedTitle(innerWidth);
     }
 
+    lines = indentResponseLines(lines, pad);
     this.cachedLines = lines;
     return lines;
   }

@@ -1,28 +1,25 @@
 /**
- * thinking-scroll — compact thinking + collapsed tool titles for pi.
+ * pi-grok-tui — Grok-flavored pi TUI (display-only).
  *
- * Thinking:
- *   1. Live 3-line scrolling view while streaming
- *   2. Finished → single row `Thought (⌥T/Alt+T)`
- *   3. ⌥T / Alt+T / Ctrl+Shift+T expands/collapses all thinking
+ * Thinking: live 3-line scroll → Thought (⌥T) · expand with ⌥T / Alt+T / Ctrl+Shift+H
+ * Tools: Grok titles, grouping, Ctrl+O compact/preview/full; edit/write keep native highlight
+ * User: #0f1217 bubble + ❯ arrow; response rows indented to match
  *
- * Tools:
- *   - Running: native live output
- *   - Finished collapsible (not edit/write): Grok-style title + (Ctrl+O)
- *   - edit/write: always native expanded (Grok Edit default)
- *   - Ctrl+O: pi native tool expand
- *
- * Display-only. Does not alter session data or model I/O.
+ * Does not alter session data or model I/O.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { installCustomMessageCollapsePatch } from "./custom-message-collapse.js";
 import { installParentStamp } from "./parent-stamp.js";
 import { installSkillFlatPatch } from "./skill-flat.js";
 import { getState } from "./state.js";
-import { thinkingExpandShortcutIds } from "./thinking-keys.js";
+import {
+  isThinkingExpandInput,
+  thinkingExpandShortcutIds,
+} from "./thinking-keys.js";
 import { installThinkingPatch } from "./thinking-patch.js";
 import { installToolCollapsePatch } from "./tool-collapse.js";
 import { installToolViewCyclePatch } from "./tool-view-cycle.js";
+import { installUserMessageStylePatch } from "./user-message-style.js";
 
 async function installPatch(): Promise<() => void> {
   // Parent stamp first so subsequent UI builds record siblings for spacing.
@@ -32,11 +29,12 @@ async function installPatch(): Promise<() => void> {
   let cleanupCustom: (() => void) | undefined;
   let cleanupCycle: (() => void) | undefined;
   let cleanupSkill: (() => void) | undefined;
+  let cleanupUser: (() => void) | undefined;
   try {
     cleanupTools = await installToolCollapsePatch();
   } catch (error) {
     console.warn(
-      "thinking-scroll: tool collapse patch failed:",
+      "pi-grok-tui: tool collapse patch failed:",
       error instanceof Error ? error.message : error,
     );
   }
@@ -44,7 +42,7 @@ async function installPatch(): Promise<() => void> {
     cleanupCustom = await installCustomMessageCollapsePatch();
   } catch (error) {
     console.warn(
-      "thinking-scroll: custom message collapse patch failed:",
+      "pi-grok-tui: custom message collapse patch failed:",
       error instanceof Error ? error.message : error,
     );
   }
@@ -52,7 +50,7 @@ async function installPatch(): Promise<() => void> {
     cleanupSkill = await installSkillFlatPatch();
   } catch (error) {
     console.warn(
-      "thinking-scroll: skill flat patch failed:",
+      "pi-grok-tui: skill flat patch failed:",
       error instanceof Error ? error.message : error,
     );
   }
@@ -60,7 +58,15 @@ async function installPatch(): Promise<() => void> {
     cleanupCycle = await installToolViewCyclePatch();
   } catch (error) {
     console.warn(
-      "thinking-scroll: tool view cycle patch failed:",
+      "pi-grok-tui: tool view cycle patch failed:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+  try {
+    cleanupUser = await installUserMessageStylePatch();
+  } catch (error) {
+    console.warn(
+      "pi-grok-tui: user message style patch failed:",
       error instanceof Error ? error.message : error,
     );
   }
@@ -70,6 +76,7 @@ async function installPatch(): Promise<() => void> {
     cleanupCustom?.();
     cleanupSkill?.();
     cleanupCycle?.();
+    cleanupUser?.();
     cleanupStamp();
   };
 }
@@ -121,33 +128,67 @@ export async function retainPatch(): Promise<() => Promise<void>> {
   };
 }
 
+type ToggleCtx = {
+  hasUI?: boolean;
+  ui?: {
+    notify?: (msg: string, level?: string) => void;
+    setStatus?: (key: string, text: string | undefined) => void;
+    onTerminalInput?: (
+      handler: (data: string) => { consume?: boolean } | undefined,
+    ) => () => void;
+  };
+};
+
+function toggleThinkingExpand(ctx?: ToggleCtx): void {
+  const state = getState();
+  state.globalExpanded = !state.globalExpanded;
+  const msg = state.globalExpanded
+    ? "Thinking expanded (⌥T / Alt+T / Ctrl+Shift+H)"
+    : "Thinking collapsed (⌥T / Alt+T / Ctrl+Shift+H)";
+  try {
+    // setStatus is lightweight footer text; notify also re-renders chat so
+    // ThinkingScrollComponent re-reads globalExpanded.
+    ctx?.ui?.setStatus?.("pi-grok-tui", msg);
+    ctx?.ui?.notify?.(msg, "info");
+  } catch {
+    /* ignore */
+  }
+}
+
 export default function (pi: ExtensionAPI) {
   let degraded = false;
+  let terminalInputUnsub: (() => void) | undefined;
 
-  const toggleThinking = async (ctx: {
-    hasUI?: boolean;
-    ui?: { notify?: (msg: string, level?: string) => void };
-  }) => {
-    const state = getState();
-    state.globalExpanded = !state.globalExpanded;
-    // Force thinking rows to re-render (invalidate cached lines)
+  const detachTerminalInput = () => {
     try {
-      // Session UI re-render; components re-read globalExpanded on next paint
-      ctx.ui?.notify?.(
-        state.globalExpanded ? "All thinking expanded" : "All thinking collapsed",
-        "info",
-      );
+      terminalInputUnsub?.();
     } catch {
       /* ignore */
     }
+    terminalInputUnsub = undefined;
   };
 
-  // Mac: Option+T types "†" unless Option is Meta — register both.
-  // Also Ctrl+Shift+T as a reliable fallback on all platforms.
+  const attachTerminalInput = (ctx: ToggleCtx) => {
+    detachTerminalInput();
+    if (!ctx.hasUI || typeof ctx.ui?.onTerminalInput !== "function") return;
+
+    // Raw input path — required for macOS Option+T ("†"), which pi.registerShortcut
+    // cannot match (matchesKey rejects non a–z single chars).
+    terminalInputUnsub = ctx.ui.onTerminalInput((data) => {
+      if (!isThinkingExpandInput(data)) return undefined;
+      toggleThinkingExpand(ctx);
+      return { consume: true };
+    });
+  };
+
+  // Best-effort: alt+t / ctrl+shift+h when the terminal actually emits them.
+  // "†" is intentionally NOT registered here — matchesKey never matches it.
   for (const id of thinkingExpandShortcutIds()) {
     pi.registerShortcut(id, {
       description: "Toggle all thinking expand/collapse",
-      handler: toggleThinking,
+      handler: (ctx) => {
+        toggleThinkingExpand(ctx);
+      },
     });
   }
 
@@ -155,6 +196,13 @@ export default function (pi: ExtensionAPI) {
     const state = getState();
     state.activeByTimestamp.clear();
     state.globalExpanded = false;
+
+    // Re-bind raw Option+T listener every session (rebind clears UI listeners).
+    try {
+      attachTerminalInput(ctx);
+    } catch {
+      /* ignore */
+    }
 
     // Patches are process-global (prototype monkey-patches). Keep them across
     // resume so renderBeforeBind sees them; only reinstall when missing/broken.
@@ -184,7 +232,7 @@ export default function (pi: ExtensionAPI) {
       if (ctx.hasUI) {
         try {
           ctx.ui.notify(
-            `thinking-scroll: ${error instanceof Error ? error.message : String(error)}`,
+            `pi-grok-tui: ${error instanceof Error ? error.message : String(error)}`,
             "warning",
           );
         } catch {
@@ -241,6 +289,7 @@ export default function (pi: ExtensionAPI) {
     const state = getState();
     state.activeByTimestamp.clear();
     state.globalExpanded = false;
+    detachTerminalInput();
 
     if ((event.reason === "reload" || event.reason === "quit") && state.patchRelease) {
       try {

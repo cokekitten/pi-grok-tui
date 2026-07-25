@@ -18,7 +18,7 @@ export async function installSkillFlatPatch(): Promise<() => void> {
     | undefined;
 
   if (!Ctor?.prototype?.updateDisplay) {
-    throw new Error("thinking-scroll: SkillInvocationMessageComponent missing");
+    throw new Error("pi-grok-tui: SkillInvocationMessageComponent missing");
   }
 
   const proto = Ctor.prototype;

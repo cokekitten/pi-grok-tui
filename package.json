@@ -1,23 +1,24 @@
 {
-  "name": "pi-thinking-scroll",
-  "version": "0.2.1",
-  "description": "Grok-style compact thinking + tool chrome for the pi TUI.",
+  "name": "pi-grok-tui",
+  "version": "0.3.0",
+  "description": "Grok-flavored pi TUI: compact thinking, tool chrome, user bubbles, spacing.",
   "type": "module",
   "license": "MIT",
   "keywords": [
     "pi-package",
     "pi-extension",
+    "grok",
+    "tui",
     "thinking",
     "tools",
-    "tui",
-    "llm"
+    "ui"
   ],
   "scripts": {
-    "test": "node --experimental-strip-types --test tool-titles.test.mjs"
+    "test": "node --experimental-strip-types --test tool-titles.test.mjs thinking-keys.test.mjs"
   },
   "pi": {
     "extensions": [
-      "./extensions/thinking-scroll.ts"
+      "./extensions/grok-tui.ts"
     ]
   },
   "peerDependencies": {

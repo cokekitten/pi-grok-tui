@@ -10,6 +10,7 @@
  * reentrancy-guarded so nested addChild during updateContent never storms.
  */
 import { Container } from "@earendil-works/pi-tui";
+import { getToolViewMode } from "./state.js";
 
 const PARENT_KEY = "__piThinkingScrollParent";
 
@@ -72,6 +73,10 @@ export function assistantHasProse(c: unknown): boolean {
 
 /**
  * Whether a blank line should separate `prev` from the next chrome/content row.
+ *
+ * Tool chrome (one-line titles): stack tightly with following Thought/tools.
+ * Tool preview/full (body visible): leave one blank before the next block so
+ * expanded bash/output does not stick to ◆ Thought.
  */
 export function shouldGapAfter(prev: unknown | null): boolean {
   if (!prev) return false;
@@ -84,6 +89,9 @@ export function shouldGapAfter(prev: unknown | null): boolean {
   ) {
     const t = prev as { expanded?: boolean; hideComponent?: boolean };
     if (t.hideComponent) return false;
+    // truncated/full show tool body even when `expanded` is false (truncated).
+    // Only chrome mode stacks Thought tight against one-line tool titles.
+    if (getToolViewMode() !== "chrome") return true;
     if (t.expanded) return true;
     return false;
   }

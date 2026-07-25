@@ -21,7 +21,7 @@ export interface ThinkingScrollState {
   patchRelease?: (() => Promise<void>) | undefined;
 }
 
-const STATE_KEY = Symbol.for("thinking-scroll.state");
+const STATE_KEY = Symbol.for("pi-grok-tui.state");
 
 const MODE_ORDER: ToolViewMode[] = ["chrome", "truncated", "full"];
 
