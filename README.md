@@ -30,6 +30,13 @@ Grok-flavored TUI for [pi](https://github.com/earendil-works/pi-coding-agent) �
 - Leading `❯` in `#c4a7e7`
 - Assistant / tool rows indented to line up with the arrow column
 
+### Editor
+
+- Keeps the main input editor and footer visually docked at the bottom while the transcript is shorter than the terminal.
+- Normal terminal scrolling takes over after the transcript exceeds the viewport.
+- If previously overflowing content shrinks (for example, after collapsing output), enable pi's `terminal.clearOnShrink` setting or set `PI_CLEAR_ON_SHRINK=1` to re-anchor the inline viewport. This can flicker and may clear terminal scrollback.
+- Set `PI_GROK_TUI_DOCK_EDITOR=0` to restore pi's native inline editor layout.
+
 Only changes TUI rendering. It does not modify LLM context, provider payloads, session messages, or stored conversation data.
 
 ## Install
@@ -67,7 +74,7 @@ After installing, restart pi or run `/reload`.
 
 ## Notes
 
-This extension monkey-patches pi’s internal TUI components. It may need updates if pi changes those internals.
+This extension monkey-patches pi’s internal TUI components, including locating pi's `CustomEditor` and padding the root layout for editor docking. It may need updates if pi changes those internals. The dock is visual padding, not a separate scrollable message pane.
 
 Formerly **`pi-thinking-scroll`** (repo renamed to `pi-grok-tui`).
 
