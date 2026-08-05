@@ -9,6 +9,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { installCustomMessageCollapsePatch } from "./custom-message-collapse.js";
+import { installEditorDockPatch } from "./editor-dock.js";
 import { installParentStamp } from "./parent-stamp.js";
 import { installSkillFlatPatch } from "./skill-flat.js";
 import { getState } from "./state.js";
@@ -25,6 +26,7 @@ async function installPatch(): Promise<() => void> {
   // Parent stamp first so subsequent UI builds record siblings for spacing.
   const cleanupStamp = installParentStamp();
   const cleanupThinking = await installThinkingPatch();
+  const cleanupEditorDock = installEditorDockPatch();
   let cleanupTools: (() => void) | undefined;
   let cleanupCustom: (() => void) | undefined;
   let cleanupCycle: (() => void) | undefined;
@@ -77,6 +79,7 @@ async function installPatch(): Promise<() => void> {
     cleanupSkill?.();
     cleanupCycle?.();
     cleanupUser?.();
+    cleanupEditorDock();
     cleanupStamp();
   };
 }
@@ -133,11 +136,22 @@ type ToggleCtx = {
   ui?: {
     notify?: (msg: string, level?: string) => void;
     setStatus?: (key: string, text: string | undefined) => void;
+    setWidget?: (key: string, content: undefined) => void;
     onTerminalInput?: (
       handler: (data: string) => { consume?: boolean } | undefined,
     ) => () => void;
   };
 };
+
+function requestEditorDockRender(ctx?: ToggleCtx): void {
+  try {
+    // Removing a non-existent widget is a side-effect-free way to ask pi's UI
+    // for a fresh render after the process-global TUI patch is installed.
+    ctx?.ui?.setWidget?.("pi-grok-tui:editor-dock-refresh", undefined);
+  } catch {
+    /* ignore */
+  }
+}
 
 function toggleThinkingExpand(ctx?: ToggleCtx): void {
   const state = getState();
@@ -208,6 +222,7 @@ export default function (pi: ExtensionAPI) {
     // resume so renderBeforeBind sees them; only reinstall when missing/broken.
     if (state.patchCleanup && state.patchRelease) {
       degraded = false;
+      requestEditorDockRender(ctx);
       return;
     }
 
@@ -226,6 +241,7 @@ export default function (pi: ExtensionAPI) {
     try {
       state.patchRelease = await retainPatch();
       degraded = false;
+      requestEditorDockRender(ctx);
     } catch (error) {
       // Never throw — extension onError paints a red stack into the chat.
       degraded = true;
