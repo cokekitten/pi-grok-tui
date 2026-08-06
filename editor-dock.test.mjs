@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { Container, Text, TUI } from "@earendil-works/pi-tui";
+import { Container, Text, TuiMainScreen } from "@earendil-works/pi-tui";
 import {
   editorDockFillRows,
   installEditorDockPatch,
@@ -52,12 +52,15 @@ describe("editorDockFillRows", () => {
 });
 
 describe("installEditorDockPatch", () => {
-  it("keeps the main editor at the same screen row while chat grows", () => {
+  it("keeps the main editor at the same screen row through Pi's stable TUI reference", () => {
     const terminal = new FakeTerminal();
-    const tui = new TUI(terminal);
+    const tui = new TuiMainScreen(terminal);
+    // Pi 0.84 gives components a stable proxy while render() runs on the
+    // replaceable concrete renderer, so object identity intentionally differs.
+    const stableTuiReference = new Proxy(tui, {});
     const chat = new Container();
     const editorContainer = new Container();
-    const editor = new FakeMainEditor(tui);
+    const editor = new FakeMainEditor(stableTuiReference);
 
     chat.addChild(new Text("hello", 0, 0));
     editorContainer.addChild(editor);
@@ -97,7 +100,7 @@ describe("installEditorDockPatch", () => {
 
   it("preserves native rendering when the main editor is absent", () => {
     const terminal = new FakeTerminal();
-    const tui = new TUI(terminal);
+    const tui = new TuiMainScreen(terminal);
     tui.addChild(new Text("selector\nwithout editor", 0, 0));
     const expected = tui.render(terminal.columns);
 
@@ -126,15 +129,15 @@ describe("isEditorDockEnabled", () => {
     }
   });
 
-  it("leaves TUI.render untouched when disabled", () => {
+  it("leaves TuiMainScreen.render untouched when disabled", () => {
     const previous = process.env.PI_GROK_TUI_DOCK_EDITOR;
-    const originalRender = TUI.prototype.render;
+    const originalRender = TuiMainScreen.prototype.render;
     try {
       process.env.PI_GROK_TUI_DOCK_EDITOR = "0";
       const cleanup = installEditorDockPatch();
-      assert.equal(TUI.prototype.render, originalRender);
+      assert.equal(TuiMainScreen.prototype.render, originalRender);
       cleanup();
-      assert.equal(TUI.prototype.render, originalRender);
+      assert.equal(TuiMainScreen.prototype.render, originalRender);
     } finally {
       if (previous === undefined) delete process.env.PI_GROK_TUI_DOCK_EDITOR;
       else process.env.PI_GROK_TUI_DOCK_EDITOR = previous;

@@ -12,7 +12,7 @@
  * re-anchor the inline viewport. Disable with PI_GROK_TUI_DOCK_EDITOR=0 if
  * another extension owns root layout.
  */
-import { TUI } from "@earendil-works/pi-tui";
+import { TuiMainScreen, type TUI } from "@earendil-works/pi-tui";
 
 type Renderable = {
   render(width: number): string[];
@@ -51,10 +51,16 @@ function isMainEditor(node: unknown, tui: DockableTui): boolean {
     handleInput?: unknown;
   };
 
-  // CustomEditor owns app-level actionHandlers; this avoids matching ordinary
-  // text inputs used inside selectors/dialogs.
+  // Since Pi 0.84, CustomEditor holds a stable proxy that forwards to the
+  // replaceable renderer, so its TUI reference is not object-identical to the
+  // TuiMainScreen whose render() method is running. Both still own the same
+  // terminal. CustomEditor also owns app-level actionHandlers, which avoids
+  // matching ordinary text inputs used inside selectors/dialogs.
+  const editorTui = editor.tui as { terminal?: unknown } | undefined;
+  const belongsToRenderer =
+    editor.tui === tui || editorTui?.terminal === tui.terminal;
   return (
-    editor.tui === tui &&
+    belongsToRenderer &&
     typeof editor.actionHandlers?.get === "function" &&
     typeof editor.actionHandlers?.set === "function" &&
     typeof editor.getText === "function" &&
@@ -96,7 +102,7 @@ function flatten(renderedChildren: string[][]): string[] {
 export function installEditorDockPatch(): () => void {
   if (!isEditorDockEnabled()) return () => {};
 
-  const prototype = TUI.prototype as unknown as {
+  const prototype = TuiMainScreen.prototype as unknown as {
     render(width: number): string[];
   };
   const originalRender = prototype.render;
@@ -105,7 +111,7 @@ export function installEditorDockPatch(): () => void {
   }
 
   const originalOwnDescriptor = Object.getOwnPropertyDescriptor(
-    TUI.prototype,
+    TuiMainScreen.prototype,
     "render",
   );
   let renderDepth = 0;
@@ -154,9 +160,13 @@ export function installEditorDockPatch(): () => void {
     // Do not overwrite a later extension's patch.
     if (prototype.render !== patchedRender) return;
     if (originalOwnDescriptor) {
-      Object.defineProperty(TUI.prototype, "render", originalOwnDescriptor);
+      Object.defineProperty(
+        TuiMainScreen.prototype,
+        "render",
+        originalOwnDescriptor,
+      );
     } else {
-      delete (TUI.prototype as unknown as { render?: unknown }).render;
+      delete (TuiMainScreen.prototype as unknown as { render?: unknown }).render;
     }
   };
 }
