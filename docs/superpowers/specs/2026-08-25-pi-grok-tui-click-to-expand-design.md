@@ -119,7 +119,7 @@ Same as “other collapsible tools”: chrome ↔ full. Fullscreen chrome is cli
 ### Selection and accidental no-ops
 
 - Drag on a chrome row: text selection + clipboard copy; **no** fold (pi requires an unmoved press/release to fire `openUrl`).
-- Double-click chrome: two fold toggles → net no-op. Word-select the **body**, not the title.
+- Double-click chrome: pi’s second press becomes word-select (OSC 8 is not activated once a word range is taken), so the typical result is **one** fold toggle plus a selected title word — not two fold toggles. Word-select the **body**, not the title.
 - Clicking empty gutter / assistant prose / user bubble: unchanged (selection only).
 
 ## Architecture
