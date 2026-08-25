@@ -493,17 +493,41 @@ export async function installToolCollapsePatch(): Promise<() => void> {
       const groupOpen = grouped && isGroupExpanded(header);
       const titleOnly = isTitleOnlyCandidate(this);
 
-      // Collapsed group members stay hidden even if one has a local body override.
-      if (grouped && !groupOpen && !isHeader) {
-        this.hideComponent = true;
-        if (Array.isArray(this.children)) {
-          for (const child of this.children) {
-            if (isSpacer(child)) {
-              if (typeof child.setLines === "function") child.setLines(0);
-              else child.lines = 0;
+      // Collapsed group: header is always the one-line group chrome, even if
+      // member 0 has a local body override. Other members stay hidden.
+      if (grouped && !groupOpen) {
+        if (!isHeader) {
+          this.hideComponent = true;
+          if (Array.isArray(this.children)) {
+            for (const child of this.children) {
+              if (isSpacer(child)) {
+                if (typeof child.setLines === "function") child.setLines(0);
+                else child.lines = 0;
+              }
             }
           }
+          refreshSiblings(this, members, refreshDepth);
+          return;
         }
+        clearImages(this);
+        const failed = members.filter(
+          (m) => !isToolRunning(m) && m.result?.isError === true,
+        ).length;
+        const anyError = failed > 0;
+        const base = formatVerbGroupLabel(
+          members.map((m) => ({
+            toolName: m.toolName,
+            isError: !isToolRunning(m) && m.result?.isError === true,
+          })),
+        );
+        const failedMatch = base.match(/^(.*?)( · \d+ failed)$/);
+        setCollapsedChrome(this, theme, {
+          kind: anyError ? "group_err" : "group",
+          label: failedMatch ? failedMatch[1]! : base,
+          failedSuffix: failedMatch ? failedMatch[2]! : undefined,
+          groupHeader: true,
+          header,
+        });
         refreshSiblings(this, members, refreshDepth);
         return;
       }

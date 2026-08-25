@@ -98,6 +98,19 @@ describe("collapsibleRun", () => {
   });
 });
 
+describe("collapsed group vs member override", () => {
+  it("keeps the run grouped after a member is locally expanded", () => {
+    const a = { toolName: "read", updateDisplay() {} };
+    const b = { toolName: "read", updateDisplay() {} };
+    const siblings = [a, b];
+    toggleToolAt(a, "read");
+    assert.equal(effectiveToolMode(a, "read"), "truncated");
+    const run = collapsibleRun(siblings, 0);
+    assert.equal(run.members.length, 2);
+    assert.equal(isGroupExpanded(a), false);
+  });
+});
+
 describe("toggleGroupAt", () => {
   it("expands and collapses a group without clearing member overrides", () => {
     const header = {};
