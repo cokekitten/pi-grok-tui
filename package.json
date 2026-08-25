@@ -14,7 +14,7 @@
     "ui"
   ],
   "scripts": {
-    "test": "node --experimental-strip-types --test tool-titles.test.mjs thinking-keys.test.mjs editor-dock.test.mjs click-fold-core.test.mjs"
+    "test": "node --experimental-strip-types --test tool-titles.test.mjs thinking-keys.test.mjs editor-dock.test.mjs click-fold-core.test.mjs click-fold-state.test.mjs"
   },
   "pi": {
     "extensions": [
