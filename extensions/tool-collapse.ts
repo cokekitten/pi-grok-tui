@@ -23,6 +23,7 @@ import {
   clickableChromeChild,
   collapsibleRun,
   effectiveToolMode,
+  toolChromeKind,
 } from "./tool-click.js";
 import {
   formatCollapsedToolLabel,
@@ -332,9 +333,10 @@ function restyleExpanded(
   // (syntax + diff highlights). We only remove toolSuccessBg/errorBg blocks.
   const preserveNativeBody = !isCollapsibleTool(self.toolName);
 
-  const isError = !isToolRunning(self) && self.result?.isError === true;
-  const isRunning = isToolRunning(self);
-  const kind = isRunning ? "tool_run" : isError ? "tool_err" : "tool_ok";
+  const kind = toolChromeKind({
+    running: isToolRunning(self),
+    isError: !isToolRunning(self) && self.result?.isError === true,
+  });
   const label = formatCollapsedToolLabel(self.toolName, self.args, {
     cwd: self.cwd,
   });
@@ -533,11 +535,9 @@ export async function installToolCollapsePatch(): Promise<() => void> {
       }
 
       const paintGroupHeader = grouped && isHeader;
-      const failed = members.filter(
+      const anyError = members.some(
         (m) => !isToolRunning(m) && m.result?.isError === true,
-      ).length;
-      const anyError = failed > 0;
-      const anyRunning = members.some(isToolRunning);
+      );
       const groupChrome = () => {
         const base = formatVerbGroupLabel(
           members.map((m) => ({
@@ -577,11 +577,10 @@ export async function installToolCollapsePatch(): Promise<() => void> {
       const label = formatCollapsedToolLabel(this.toolName, this.args, {
         cwd: this.cwd,
       });
-      const kind = anyRunning
-        ? "tool_run"
-        : anyError
-          ? "tool_err"
-          : "tool_ok";
+      const kind = toolChromeKind({
+        running: isToolRunning(this),
+        isError: !isToolRunning(this) && this.result?.isError === true,
+      });
       if (paintGroupHeader && groupOpen) {
         const g = groupChrome();
         setCollapsedChrome(this, theme, {

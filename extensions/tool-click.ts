@@ -18,6 +18,15 @@ import {
 } from "./state.ts";
 import { isCollapsibleTool } from "./tool-titles.ts";
 
+export function toolChromeKind(status: {
+  running: boolean;
+  isError: boolean;
+}): ChromeKind {
+  if (status.running) return "tool_run";
+  if (status.isError) return "tool_err";
+  return "tool_ok";
+}
+
 export function effectiveToolMode(target: object, toolName: string): ToolViewMode {
   if (!isCollapsibleTool(toolName)) return "full";
   return getViewOverride(target) ?? getToolViewMode();

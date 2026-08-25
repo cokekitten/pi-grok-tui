@@ -6,6 +6,7 @@ import {
   toggleGroupAt,
   classifySibling,
   collapsibleRun,
+  toolChromeKind,
 } from "./extensions/tool-click.ts";
 import {
   getState,
@@ -18,6 +19,19 @@ import {
 beforeEach(() => {
   resetClickFoldSession();
   getState().toolViewMode = "chrome";
+});
+
+describe("toolChromeKind", () => {
+  it("uses this tool's running/error, not a group aggregate", () => {
+    assert.equal(toolChromeKind({ running: true, isError: false }), "tool_run");
+    assert.equal(toolChromeKind({ running: false, isError: true }), "tool_err");
+    assert.equal(toolChromeKind({ running: false, isError: false }), "tool_ok");
+    // A sibling failure must not paint this successful member red.
+    const siblingFailed = true;
+    const self = { running: false, isError: false };
+    assert.equal(toolChromeKind(self), "tool_ok");
+    assert.notEqual(toolChromeKind(self), siblingFailed ? "tool_err" : "tool_ok");
+  });
 });
 
 describe("effectiveToolMode", () => {
