@@ -32,6 +32,33 @@ describe("effectiveToolMode", () => {
     assert.equal(effectiveToolMode(edit, "edit"), "full");
   });
 
+  it("prefers updateDisplay and does not also rebuild", () => {
+    let displays = 0;
+    let rebuilds = 0;
+    const tool = {
+      updateDisplay() {
+        displays += 1;
+      },
+      rebuild() {
+        rebuilds += 1;
+      },
+    };
+    toggleToolAt(tool, "bash");
+    assert.equal(displays, 1);
+    assert.equal(rebuilds, 0);
+  });
+
+  it("falls back to rebuild when updateDisplay is missing", () => {
+    let rebuilds = 0;
+    const custom = {
+      rebuild() {
+        rebuilds += 1;
+      },
+    };
+    toggleToolAt(custom, "custom");
+    assert.equal(rebuilds, 1);
+  });
+
   it("read click goes chrome → truncated, bash goes chrome → full", () => {
     const read = {};
     const bash = {};

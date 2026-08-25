@@ -28,8 +28,8 @@ export function toggleToolAt(target: object, toolName: string): ToolViewMode {
   setViewOverride(target, next);
   const updater = target as { updateDisplay?: () => void; rebuild?: () => void };
   try {
-    updater.updateDisplay?.();
-    updater.rebuild?.();
+    if (typeof updater.updateDisplay === "function") updater.updateDisplay();
+    else updater.rebuild?.();
   } catch {
     /* render will pick up the override */
   }

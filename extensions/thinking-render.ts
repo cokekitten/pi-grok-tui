@@ -38,6 +38,8 @@ export class ThinkingScrollComponent {
   private cachedWidth?: number;
   private cachedExpanded?: boolean;
   private cachedActive?: boolean;
+  private cachedTuiMode?: string;
+  private cachedClickFoldReady?: boolean;
   private cachedMarkdownKey?: string;
   private cachedMarkdownLines?: string[];
 
@@ -62,6 +64,8 @@ export class ThinkingScrollComponent {
       this.cachedWidth === width &&
       this.cachedExpanded === isExpanded &&
       this.cachedActive === isActive &&
+      this.cachedTuiMode === state.tuiMode &&
+      this.cachedClickFoldReady === state.clickFoldReady &&
       this.lastRenderedText === fullText
     ) {
       return this.cachedLines;
@@ -71,6 +75,8 @@ export class ThinkingScrollComponent {
     this.cachedWidth = width;
     this.cachedExpanded = isExpanded;
     this.cachedActive = isActive;
+    this.cachedTuiMode = state.tuiMode;
+    this.cachedClickFoldReady = state.clickFoldReady;
 
     let lines: string[];
     if (isActive) {
@@ -211,6 +217,8 @@ export class ThinkingScrollComponent {
     this.cachedLines = undefined;
     this.cachedWidth = undefined;
     this.lastRenderedText = "";
+    this.cachedTuiMode = undefined;
+    this.cachedClickFoldReady = undefined;
     this.cachedMarkdownKey = undefined;
     this.cachedMarkdownLines = undefined;
   }
