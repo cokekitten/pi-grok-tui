@@ -571,21 +571,8 @@ export async function installToolCollapsePatch(): Promise<() => void> {
         return;
       }
 
-      // ── chrome mode: one-line titles + grouping
+      // ── chrome mode: one-line titles (expanded groups already handled above)
       clearImages(this);
-
-      if (paintGroupHeader && !groupOpen) {
-        const g = groupChrome();
-        setCollapsedChrome(this, theme, {
-          kind: g.kind,
-          label: g.label,
-          failedSuffix: g.failedSuffix,
-          groupHeader: true,
-          header,
-        });
-        refreshSiblings(this, members, refreshDepth);
-        return;
-      }
 
       const label = formatCollapsedToolLabel(this.toolName, this.args, {
         cwd: this.cwd,
