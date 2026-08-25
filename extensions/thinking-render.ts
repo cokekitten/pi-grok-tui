@@ -16,7 +16,7 @@ import {
   type ChromeTheme,
 } from "./chrome.js";
 import { getState } from "./state.js";
-import { THINKING_EXPAND_HINT } from "./thinking-keys.js";
+import { renderThinkingChromeLine, thinkingIsExpanded } from "./thinking-click.js";
 
 export const MAX_VISIBLE_LINES = 3;
 
@@ -50,7 +50,7 @@ export class ThinkingScrollComponent {
 
   render(width: number): string[] {
     const state = getState();
-    const isExpanded = state.globalExpanded;
+    const isExpanded = thinkingIsExpanded(this.messageTimestamp);
     const isActive = state.activeByTimestamp.has(this.messageTimestamp);
     const fullText = this.thinkingBlocks.map((b) => b.text).join("\n");
     const pad = RESPONSE_LEFT_PAD;
@@ -86,14 +86,9 @@ export class ThinkingScrollComponent {
     return lines;
   }
 
-  /** Finished collapsed: `◆ Thought (⌥T)` — same chrome family as tools. */
+  /** Finished collapsed: `◆ Thought` (clickable in fullscreen). */
   private buildFinishedTitle(width: number): string[] {
-    const line = formatChromeLine(this.theme, {
-      kind: "thinking",
-      label: "Thought",
-      hint: THINKING_EXPAND_HINT,
-    });
-    return [truncateToWidth(line, width, "")];
+    return [renderThinkingChromeLine(width, this.theme, this.messageTimestamp)];
   }
 
   private buildActive(fullText: string, width: number): string[] {
@@ -125,11 +120,11 @@ export class ThinkingScrollComponent {
 
   private buildExpanded(fullText: string, width: number): string[] {
     // Header row + dimmer body (title stays muted diamond chrome)
-    const header = formatChromeLine(this.theme, {
-      kind: "thinking",
-      label: "Thought",
-      hint: THINKING_EXPAND_HINT,
-    });
+    const header = renderThinkingChromeLine(
+      width,
+      this.theme,
+      this.messageTimestamp,
+    );
     const rendered = this.renderThinkingMarkdown(fullText, width - 2, {
       preserveLineBreaks: true,
       dimBody: true,
@@ -138,7 +133,7 @@ export class ThinkingScrollComponent {
       if (l.trim() === "") return "";
       return `  ${bodyFg(stripAnsiLocal(l))}`;
     });
-    return [truncateToWidth(header, width, ""), ...body];
+    return [header, ...body];
   }
 
   private thinkingDefaultStyle(dimBody = false) {

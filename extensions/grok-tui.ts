@@ -11,8 +11,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { installCustomMessageCollapsePatch } from "./custom-message-collapse.js";
 import { installEditorDockPatch } from "./editor-dock.js";
 import { installParentStamp } from "./parent-stamp.js";
+import { installClickFoldPatch, resetFoldHandlers } from "./click-fold.js";
 import { installSkillFlatPatch } from "./skill-flat.js";
-import { getState } from "./state.js";
+import { getState, resetClickFoldSession } from "./state.js";
+import { applyGlobalThinkingToggle } from "./thinking-click.js";
 import {
   isThinkingExpandInput,
   thinkingExpandShortcutIds,
@@ -23,6 +25,16 @@ import { installToolViewCyclePatch } from "./tool-view-cycle.js";
 import { installUserMessageStylePatch } from "./user-message-style.js";
 
 async function installPatch(): Promise<() => void> {
+  // Click intercept first so chrome render sees clickFoldReady on the first paint.
+  let cleanupClick: (() => void) | undefined;
+  try {
+    cleanupClick = installClickFoldPatch();
+  } catch (error) {
+    console.warn(
+      "pi-grok-tui: click-fold patch failed:",
+      error instanceof Error ? error.message : error,
+    );
+  }
   // Parent stamp first so subsequent UI builds record siblings for spacing.
   const cleanupStamp = installParentStamp();
   const cleanupThinking = await installThinkingPatch();
@@ -81,6 +93,7 @@ async function installPatch(): Promise<() => void> {
     cleanupUser?.();
     cleanupEditorDock();
     cleanupStamp();
+    cleanupClick?.();
   };
 }
 
@@ -154,9 +167,8 @@ function requestEditorDockRender(ctx?: ToggleCtx): void {
 }
 
 function toggleThinkingExpand(ctx?: ToggleCtx): void {
-  const state = getState();
-  state.globalExpanded = !state.globalExpanded;
-  const msg = state.globalExpanded
+  const expanded = applyGlobalThinkingToggle();
+  const msg = expanded
     ? "Thinking expanded (⌥T / Alt+T / Ctrl+Shift+H)"
     : "Thinking collapsed (⌥T / Alt+T / Ctrl+Shift+H)";
   try {
@@ -210,6 +222,8 @@ export default function (pi: ExtensionAPI) {
     const state = getState();
     state.activeByTimestamp.clear();
     state.globalExpanded = false;
+    resetClickFoldSession();
+    resetFoldHandlers();
 
     // Re-bind raw Option+T listener every session (rebind clears UI listeners).
     try {
@@ -305,6 +319,8 @@ export default function (pi: ExtensionAPI) {
     const state = getState();
     state.activeByTimestamp.clear();
     state.globalExpanded = false;
+    resetClickFoldSession();
+    resetFoldHandlers();
     detachTerminalInput();
 
     if ((event.reason === "reload" || event.reason === "quit") && state.patchRelease) {

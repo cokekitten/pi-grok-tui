@@ -83,12 +83,16 @@ describe("withFoldOpenUrl", () => {
   it("consumes grok URLs and forwards other schemes", () => {
     const opened = [];
     let clicks = 0;
+    let renders = 0;
     registerFoldHandler("abc", () => {
       clicks += 1;
     });
     const self = {
       openUrl(url) {
         opened.push(url);
+      },
+      requestRender() {
+        renders += 1;
       },
     };
     withFoldOpenUrl(self, () => {
@@ -98,6 +102,7 @@ describe("withFoldOpenUrl", () => {
     });
     assert.deepEqual(opened, ["https://example.com"]);
     assert.equal(clicks, 1);
+    assert.equal(renders, 2);
     assert.equal(typeof self.openUrl, "function");
   });
 });

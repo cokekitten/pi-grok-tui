@@ -70,13 +70,23 @@ export function groupFoldId(header: object): string {
   return `${idForTarget(header)}:g`;
 }
 
-type OpenUrlHost = { openUrl?: (url: string) => void };
+type OpenUrlHost = {
+  openUrl?: (url: string) => void;
+  requestRender?: (force?: boolean) => void;
+};
 
 /** Swap openUrl for the duration of `fn` so grok fold URLs never hit the browser. */
 export function withFoldOpenUrl<T>(host: OpenUrlHost, fn: () => T): T {
   const previous = host.openUrl;
   host.openUrl = (url: string) => {
-    if (dispatchGrokFoldUrl(url)) return;
+    if (dispatchGrokFoldUrl(url)) {
+      try {
+        host.requestRender?.();
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     previous?.(url);
   };
   try {
