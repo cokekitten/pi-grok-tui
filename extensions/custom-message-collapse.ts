@@ -2,10 +2,8 @@
  * Collapse CustomMessageComponent (e.g. pi-web-access [web-search-content-ready])
  * to a single Grok-style chrome line when tools are not expanded.
  */
-import { Text } from "@earendil-works/pi-tui";
 import {
   bodyFg,
-  formatChromeLine,
   RESPONSE_LEFT_PAD,
   type ChromeTheme,
 } from "./chrome.js";
@@ -15,7 +13,7 @@ import {
   PI_CODING_AGENT,
   INTERNAL_MODULES,
 } from "./internal-import.js";
-import { getToolViewMode } from "./state.js";
+import { clickableChromeChild, effectiveToolMode } from "./tool-click.js";
 
 interface CustomMessageProto {
   message: {
@@ -79,8 +77,12 @@ export async function installCustomMessageCollapsePatch(): Promise<() => void> {
 
   proto.rebuild = function (this: CustomMessageProto) {
     try {
+      const mode = effectiveToolMode(this, "custom");
+      const showBody = mode !== "chrome";
+      this._expanded = showBody;
+
       // chrome → one-line; truncated/full → body without color block, dim text
-      if (this._expanded || getToolViewMode() !== "chrome") {
+      if (showBody) {
         originalRebuild.call(this);
         try {
           stripBgDeep(this);
@@ -105,12 +107,15 @@ export async function installCustomMessageCollapsePatch(): Promise<() => void> {
       const type = this.message?.customType || "message";
       const body = oneLine(extractText(this.message));
       const label = body ? `[${type}] ${body}` : `[${type}]`;
-      const line = formatChromeLine(theme, {
-        kind: "group",
-        label,
-        hint: " (Ctrl+O)",
-      });
-      this.addChild(new Text(line, RESPONSE_LEFT_PAD, 0) as any);
+      this.addChild(
+        clickableChromeChild(theme, {
+          target: this,
+          toolName: "custom",
+          kind: "group",
+          label,
+          pad: RESPONSE_LEFT_PAD,
+        }) as any,
+      );
     } catch {
       try {
         originalRebuild.call(this);

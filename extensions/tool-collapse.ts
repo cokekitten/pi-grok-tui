@@ -4,13 +4,11 @@
  * - truncated/full: strip background blocks only; collapsible tools get a ◆ title
  *   and quieter body; edit/write keep native syntax/diff highlighting
  */
-import { Text } from "@earendil-works/pi-tui";
 import {
   bodyFg,
-  formatChromeLine,
   RESPONSE_LEFT_PAD,
   responsePadString,
-  safeFg,
+  type ChromeKind,
   type ChromeTheme,
 } from "./chrome.js";
 import { dimBodyTexts, stripBgDeep } from "./flat-style.js";
@@ -20,7 +18,12 @@ import {
   INTERNAL_MODULES,
 } from "./internal-import.js";
 import { getPreviousSibling, getSiblings, shouldGapAfter } from "./parent-stamp.js";
-import { getToolViewMode } from "./state.js";
+import { getToolViewMode, isGroupExpanded } from "./state.js";
+import {
+  clickableChromeChild,
+  collapsibleRun,
+  effectiveToolMode,
+} from "./tool-click.js";
 import {
   formatCollapsedToolLabel,
   formatVerbGroupLabel,
@@ -120,67 +123,32 @@ function isToolRunning(t: ToolExecutionProto): boolean {
 }
 
 function isTitleOnlyCandidate(t: ToolExecutionProto): boolean {
-  return getToolViewMode() === "chrome" && isCollapsibleTool(t.toolName);
-}
-
-function isCrossableGap(c: unknown): boolean {
-  return isSpacer(c);
+  return effectiveToolMode(t, t.toolName) === "chrome";
 }
 
 function consecutiveGroup(self: ToolExecutionProto): {
   members: ToolExecutionProto[];
+  header: ToolExecutionProto;
   isHeader: boolean;
 } {
   const siblings = findParentChildren(self);
   if (!siblings) {
-    return { members: [self], isHeader: true };
+    return { members: [self], header: self, isHeader: true };
   }
-
   const selfIdx = siblings.indexOf(self);
   if (selfIdx < 0) {
-    return { members: [self], isHeader: true };
+    return { members: [self], header: self, isHeader: true };
   }
-
-  let start = selfIdx;
-  while (start > 0) {
-    const prev = siblings[start - 1];
-    if (isCrossableGap(prev)) {
-      start -= 1;
-      continue;
-    }
-    if (isToolComponent(prev) && isTitleOnlyCandidate(prev)) {
-      start -= 1;
-      continue;
-    }
-    break;
-  }
-
-  let end = selfIdx;
-  while (end + 1 < siblings.length) {
-    const next = siblings[end + 1];
-    if (isCrossableGap(next)) {
-      end += 1;
-      continue;
-    }
-    if (isToolComponent(next) && isTitleOnlyCandidate(next)) {
-      end += 1;
-      continue;
-    }
-    break;
-  }
-
-  const members: ToolExecutionProto[] = [];
-  for (let i = start; i <= end; i++) {
-    const c = siblings[i];
-    if (isToolComponent(c) && isTitleOnlyCandidate(c)) {
-      members.push(c);
-    }
-  }
-
+  const run = collapsibleRun(siblings, selfIdx);
+  const members = run.members.filter(isToolComponent);
   if (members.length === 0) {
-    return { members: [self], isHeader: true };
+    return { members: [self], header: self, isHeader: true };
   }
-  return { members, isHeader: members[0] === self };
+  return {
+    members,
+    header: members[0]!,
+    isHeader: members[0] === self,
+  };
 }
 
 function clearImages(self: ToolExecutionProto): void {
@@ -229,6 +197,50 @@ function applyLeadSpacer(self: ToolExecutionProto, roomy: boolean): void {
   }
 }
 
+function prependGroupHeader(
+  self: ToolExecutionProto,
+  theme: ThemeLike,
+  header: ToolExecutionProto,
+  g: { kind: ChromeKind; label: string; failedSuffix?: string },
+): void {
+  const child = chromeChild(self, theme, {
+    kind: g.kind,
+    label: g.label,
+    failedSuffix: g.failedSuffix,
+    groupHeader: true,
+    header,
+  });
+  (child as any)[TITLE_MARK] = true;
+  if (self.hasRendererDefinition()) {
+    const shell = self.getRenderShell();
+    const rc =
+      shell === "self" ? self.selfRenderContainer : self.contentBox;
+    const kids = (rc as { children?: unknown[] }).children;
+    if (Array.isArray(kids)) {
+      while (
+        kids.length > 0 &&
+        (kids[0] as Record<string, unknown>)?.[TITLE_MARK] &&
+        (kids[0] as { groupHeader?: boolean }).groupHeader
+      ) {
+        kids.shift();
+      }
+      (child as { groupHeader?: boolean }).groupHeader = true;
+      kids.unshift(child);
+    }
+    return;
+  }
+  try {
+    const sp = responsePadString();
+    const line = child.render(80)[0] ?? "";
+    const body = self.contentText.text ?? "";
+    self.contentText.setText(
+      `${line.startsWith(sp) ? line : sp + line}${body ? `\n${body}` : ""}`,
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
 function applyHorizontalPad(
   renderContainer: { paddingX?: number; paddingY?: number },
 ): void {
@@ -239,8 +251,42 @@ function applyHorizontalPad(
   }
 }
 
-function setCollapsedChrome(self: ToolExecutionProto, line: string): void {
+function chromeChild(
+  self: ToolExecutionProto,
+  theme: ThemeLike,
+  opts: {
+    kind: ChromeKind;
+    label: string;
+    failedSuffix?: string;
+    groupHeader?: boolean;
+    header?: ToolExecutionProto;
+    pad?: number;
+  },
+) {
+  return clickableChromeChild(theme, {
+    target: opts.groupHeader ? (opts.header ?? self) : self,
+    toolName: self.toolName,
+    kind: opts.kind,
+    label: opts.label,
+    failedSuffix: opts.failedSuffix,
+    groupHeader: opts.groupHeader,
+    pad: opts.pad,
+  });
+}
+
+function setCollapsedChrome(
+  self: ToolExecutionProto,
+  theme: ThemeLike,
+  opts: {
+    kind: ChromeKind;
+    label: string;
+    failedSuffix?: string;
+    groupHeader?: boolean;
+    header?: ToolExecutionProto;
+  },
+): void {
   applyLeadSpacer(self, false);
+  const child = chromeChild(self, theme, opts);
 
   if (self.hasRendererDefinition()) {
     const shell = self.getRenderShell();
@@ -251,14 +297,19 @@ function setCollapsedChrome(self: ToolExecutionProto, line: string): void {
       renderContainer.setBgFn(passthrough);
     }
     renderContainer.clear();
-    renderContainer.addChild(new Text(line, 0, 0) as any);
+    renderContainer.addChild(child as any);
     self.hideComponent = false;
   } else {
     if (typeof self.contentText.setCustomBgFn === "function") {
       self.contentText.setCustomBgFn(passthrough);
     }
-    // No Box padding path — bake indent into the text.
-    self.contentText.setText(responsePadString() + line);
+    const sp = responsePadString();
+    try {
+      const line = child.render(80)[0] ?? "";
+      self.contentText.setText(line.startsWith(sp) ? line : sp + line);
+    } catch {
+      self.contentText.setText(sp + `◆ ${opts.label}`);
+    }
     self.hideComponent = false;
   }
 }
@@ -287,11 +338,7 @@ function restyleExpanded(
   const label = formatCollapsedToolLabel(self.toolName, self.args, {
     cwd: self.cwd,
   });
-  const titleLine = formatChromeLine(theme, {
-    kind,
-    label,
-    hint: " (Ctrl+O)",
-  });
+  const titleChild = chromeChild(self, theme, { kind, label });
 
   if (self.hasRendererDefinition()) {
     const shell = self.getRenderShell();
@@ -319,7 +366,7 @@ function restyleExpanded(
       ) {
         kids.shift();
       }
-      const title = new Text(titleLine, 0, 0) as any;
+      const title = titleChild as any;
       (title as any)[TITLE_MARK] = true;
       kids.unshift(title);
 
@@ -344,8 +391,9 @@ function restyleExpanded(
               .map((l) => sp + bodyFg(l))
               .join("\n")
           : "";
+        const titleLine = titleChild.render(80)[0] ?? `◆ ${label}`;
         self.contentText.setText(
-          `${sp}${titleLine}${bodyLines ? `\n${bodyLines}` : ""}`,
+          `${titleLine.startsWith(sp) ? titleLine : sp + titleLine}${bodyLines ? `\n${bodyLines}` : ""}`,
         );
       } catch {
         /* ignore */
@@ -440,29 +488,13 @@ export async function installToolCollapsePatch(): Promise<() => void> {
     if (updating.has(this)) return;
     updating.add(this);
     try {
-      const mode = getToolViewMode();
+      const { members, header, isHeader } = consecutiveGroup(this);
+      const grouped = members.length >= 2 && getToolViewMode() === "chrome";
+      const groupOpen = grouped && isGroupExpanded(header);
       const titleOnly = isTitleOnlyCandidate(this);
 
-      // ── preview / full: title + flat dim body (no color blocks)
-      if (!titleOnly) {
-        if (isCollapsibleTool(this.toolName)) {
-          const wantExpanded = mode === "full";
-          if (this.expanded !== wantExpanded) {
-            this.expanded = wantExpanded;
-          }
-        }
-        this.hideComponent = false;
-        originalUpdateDisplay.call(this);
-        restyleExpanded(this, theme);
-        return;
-      }
-
-      // ── chrome mode: one-line titles + grouping
-      clearImages(this);
-
-      const { members, isHeader } = consecutiveGroup(this);
-
-      if (!isHeader) {
+      // Collapsed group members stay hidden even if one has a local body override.
+      if (grouped && !groupOpen && !isHeader) {
         this.hideComponent = true;
         if (Array.isArray(this.children)) {
           for (const child of this.children) {
@@ -476,14 +508,13 @@ export async function installToolCollapsePatch(): Promise<() => void> {
         return;
       }
 
+      const paintGroupHeader = grouped && isHeader;
       const failed = members.filter(
         (m) => !isToolRunning(m) && m.result?.isError === true,
       ).length;
       const anyError = failed > 0;
       const anyRunning = members.some(isToolRunning);
-
-      let line: string;
-      if (members.length >= 2) {
+      const groupChrome = () => {
         const base = formatVerbGroupLabel(
           members.map((m) => ({
             toolName: m.toolName,
@@ -491,36 +522,72 @@ export async function installToolCollapsePatch(): Promise<() => void> {
           })),
         );
         const failedMatch = base.match(/^(.*?)( · \d+ failed)$/);
-        const label = failedMatch ? failedMatch[1]! : base;
-        const failedSuffix = failedMatch ? failedMatch[2]! : undefined;
-        line = formatChromeLine(theme, {
-          kind: anyError ? "group_err" : "group",
-          label,
-          failedSuffix,
-          hint: " (Ctrl+O)",
-        });
-      } else {
-        const label = formatCollapsedToolLabel(this.toolName, this.args, {
-          cwd: this.cwd,
-        });
-        const kind = anyRunning
-          ? "tool_run"
-          : anyError
-            ? "tool_err"
-            : "tool_ok";
-        line = formatChromeLine(theme, {
-          kind,
-          label,
-          hint: " (Ctrl+O)",
-        });
+        return {
+          kind: (anyError ? "group_err" : "group") as ChromeKind,
+          label: failedMatch ? failedMatch[1]! : base,
+          failedSuffix: failedMatch ? failedMatch[2]! : undefined,
+        };
+      };
+
+      // ── preview / full body (including expanded group members)
+      if (!titleOnly) {
+        if (isCollapsibleTool(this.toolName)) {
+          const wantExpanded = effectiveToolMode(this, this.toolName) === "full";
+          if (this.expanded !== wantExpanded) {
+            this.expanded = wantExpanded;
+          }
+        }
+        this.hideComponent = false;
+        originalUpdateDisplay.call(this);
+        restyleExpanded(this, theme);
+        if (paintGroupHeader && groupOpen) {
+          prependGroupHeader(this, theme, header, groupChrome());
+        }
+        refreshSiblings(this, members, refreshDepth);
+        return;
       }
 
-      setCollapsedChrome(this, line);
+      // ── chrome mode: one-line titles + grouping
+      clearImages(this);
+
+      if (paintGroupHeader && !groupOpen) {
+        const g = groupChrome();
+        setCollapsedChrome(this, theme, {
+          kind: g.kind,
+          label: g.label,
+          failedSuffix: g.failedSuffix,
+          groupHeader: true,
+          header,
+        });
+        refreshSiblings(this, members, refreshDepth);
+        return;
+      }
+
+      const label = formatCollapsedToolLabel(this.toolName, this.args, {
+        cwd: this.cwd,
+      });
+      const kind = anyRunning
+        ? "tool_run"
+        : anyError
+          ? "tool_err"
+          : "tool_ok";
+      if (paintGroupHeader && groupOpen) {
+        const g = groupChrome();
+        setCollapsedChrome(this, theme, {
+          kind,
+          label,
+        });
+        prependGroupHeader(this, theme, header, g);
+      } else {
+        setCollapsedChrome(this, theme, { kind, label });
+      }
       refreshSiblings(this, members, refreshDepth);
     } catch {
       try {
-        const fallback = `◆ ${this.toolName || "tool"}`;
-        setCollapsedChrome(this, fallback);
+        setCollapsedChrome(this, theme, {
+          kind: "tool_ok",
+          label: this.toolName || "tool",
+        });
       } catch {
         try {
           this.hideComponent = false;

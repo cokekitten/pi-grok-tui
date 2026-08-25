@@ -10,6 +10,7 @@ import {
   PI_CODING_AGENT,
 } from "./internal-import.js";
 import {
+  clearToolFoldOverrides,
   cycleToolViewMode,
   getState,
   getToolViewMode,
@@ -155,6 +156,7 @@ export async function installToolViewCyclePatch(): Promise<() => void> {
   }
 
   proto.toggleToolOutputExpansion = function (this: InteractiveModeLike) {
+    clearToolFoldOverrides();
     const mode = cycleToolViewMode();
     applyToolViewMode(this, mode);
     try {
@@ -171,6 +173,7 @@ export async function installToolViewCyclePatch(): Promise<() => void> {
     this: InteractiveModeLike,
     expanded: boolean,
   ) {
+    clearToolFoldOverrides();
     const stateMode: ToolViewMode = expanded ? "full" : "chrome";
     getState().toolViewMode = stateMode;
     applyToolViewMode(this, stateMode);
