@@ -1,8 +1,8 @@
 /**
  * pi-grok-tui — Grok-flavored pi TUI (display-only).
  *
- * Thinking: live 3-line scroll → Thought (⌥T) · expand with ⌥T / Alt+T / Ctrl+Shift+H
- * Tools: Grok titles, grouping, Ctrl+O compact/preview/full; edit/write keep native highlight
+ * Thinking: live 3-line scroll → Thought · click (fullscreen) or ⌥T / Alt+T / Ctrl+Shift+H
+ * Tools: Grok titles, grouping, click-to-fold (fullscreen), Ctrl+O compact/preview/full
  * User: #0f1217 bubble + ❯ arrow; response rows indented to match
  *
  * Does not alter session data or model I/O.
