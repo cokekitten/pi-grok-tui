@@ -12,6 +12,7 @@ import { installCustomMessageCollapsePatch } from "./custom-message-collapse.js"
 import { installEditorDockPatch } from "./editor-dock.js";
 import { installParentStamp } from "./parent-stamp.js";
 import { installClickFoldPatch, resetFoldHandlers } from "./click-fold.js";
+import { clearFoldRegistry } from "./fold-body.js";
 import { installSkillFlatPatch } from "./skill-flat.js";
 import { getState, resetClickFoldSession } from "./state.js";
 import { applyGlobalThinkingToggle } from "./thinking-click.js";
