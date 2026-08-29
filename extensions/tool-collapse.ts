@@ -18,6 +18,7 @@ import {
   INTERNAL_MODULES,
 } from "./internal-import.js";
 import { getPreviousSibling, getSiblings, shouldGapAfter } from "./parent-stamp.js";
+import { markBodyFold, markBodyFoldDeep, unmarkBodyFold } from "./fold-body.js";
 import { getToolViewMode, isGroupExpanded } from "./state.js";
 import {
   clickableChromeChild,
@@ -25,6 +26,7 @@ import {
   effectiveToolMode,
   toolChromeKind,
 } from "./tool-click.js";
+import { idForTarget } from "./click-fold.js";
 import {
   formatCollapsedToolLabel,
   formatVerbGroupLabel,
@@ -311,6 +313,9 @@ function setCollapsedChrome(
     } catch {
       self.contentText.setText(sp + `◆ ${opts.label}`);
     }
+    // Body is gone — drop its fold link so the collapsed title keeps no
+    // leftover OSC 8 from the previous expanded paint.
+    unmarkBodyFold(self.contentText);
     self.hideComponent = false;
   }
 }
@@ -373,8 +378,12 @@ function restyleExpanded(
       kids.unshift(title);
 
       // Quiet bash/read/etc body for flat look (not edit/write).
+      const bodyId = idForTarget(self);
       for (let i = 1; i < kids.length; i++) {
         dimBodyTexts(kids[i], (t) => bodyFg(t), [TITLE_MARK]);
+        // Body rows share the title's fold link: an unmoved click inside the
+        // expanded body folds this tool (fullscreen only; idempotent).
+        markBodyFoldDeep(kids[i], bodyId, [TITLE_MARK]);
       }
     }
   } else {
@@ -397,6 +406,9 @@ function restyleExpanded(
         self.contentText.setText(
           `${titleLine.startsWith(sp) ? titleLine : sp + titleLine}${bodyLines ? `\n${bodyLines}` : ""}`,
         );
+        // contentText holds title + body rows; body rows get the fold link at
+        // render time (title rows keep their own chrome link unbroken).
+        markBodyFold(self.contentText, idForTarget(self));
       } catch {
         /* ignore */
       }

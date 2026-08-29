@@ -8,12 +8,14 @@ import {
   type ChromeTheme,
 } from "./chrome.js";
 import { dimBodyTexts, stripBgDeep } from "./flat-style.js";
+import { markBodyFoldDeep } from "./fold-body.js";
 import {
   importInternal,
   PI_CODING_AGENT,
   INTERNAL_MODULES,
 } from "./internal-import.js";
 import { clickableChromeChild, effectiveToolMode } from "./tool-click.js";
+import { idForTarget } from "./click-fold.js";
 
 interface CustomMessageProto {
   message: {
@@ -87,6 +89,9 @@ export async function installCustomMessageCollapsePatch(): Promise<() => void> {
         try {
           stripBgDeep(this);
           dimBodyTexts(this, (t) => bodyFg(t), []);
+          // Body rows share the chrome title's fold link: clicking the
+          // expanded body collapses the custom message (fullscreen only).
+          markBodyFoldDeep(this, idForTarget(this), []);
         } catch {
           /* ignore */
         }

@@ -18,6 +18,7 @@ import {
   isGrokFoldScheme,
   parseFoldId,
 } from "./click-fold-core.ts";
+import { installFoldBodyTextPatch } from "./fold-body.ts";
 import { getState } from "./state.ts";
 
 const handlers = new Map<string, () => void>();
@@ -177,9 +178,15 @@ export function installClickFoldPatch(): () => void {
   altProto.handleSelectionMouseEvent = function (this: OpenUrlHost, event: unknown) {
     return withFoldOpenUrl(this, () => originalMouse.call(this, event));
   };
+
+  // Body fold links are gated on clickFoldReady at render time, so the Text
+  // patch is installed even if the mouse seam failed (it is then inert).
+  const restoreBodyText = installFoldBodyTextPatch();
+
   state.clickFoldReady = true;
 
   return () => {
+    restoreBodyText();
     altProto.handleSelectionMouseEvent = originalMouse;
     restoreAltRender();
     restoreMainRender();
