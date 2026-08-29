@@ -2,9 +2,9 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { Text } from "@earendil-works/pi-tui";
 import {
-  registerFoldRow,
-  lookupFoldRow,
-  normalizeFoldRow,
+  foldMarker,
+  parseFoldMarker,
+  withFoldMarker,
   markBodyFold,
   unmarkBodyFold,
   markBodyFoldDeep,
@@ -12,6 +12,8 @@ import {
   clearFoldRegistry,
 } from "./extensions/fold-body.ts";
 import { getState, resetClickFoldSession } from "./extensions/state.ts";
+
+const SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
 
 beforeEach(() => {
   resetClickFoldSession();
@@ -21,39 +23,53 @@ beforeEach(() => {
   state.clickFoldReady = false;
 });
 
-describe("normalizeFoldRow", () => {
-  it("strips ANSI and trims surrounding whitespace", () => {
-    assert.equal(
-      normalizeFoldRow("\x1b[38;2;1;2;3m  hello body  \x1b[0m"),
-      "hello body",
-    );
-  });
-});
-
-describe("row registry", () => {
-  it("registers a row and resolves it back", () => {
-    registerFoldRow("  some body", "f1");
-    assert.equal(lookupFoldRow("  some body"), "f1");
-    // padding/resize variance: trims and strips are normalized away
-    assert.equal(lookupFoldRow("   \x1b[38;5;8m some body   "), "f1");
+describe("fold markers", () => {
+  it("parses the id from a painted row", () => {
+    const line = foldMarker("f1") + "  some body";
+    assert.equal(parseFoldMarker(line), "f1");
   });
 
-  it("does not register blank rows", () => {
-    registerFoldRow("   ", "f1");
-    assert.equal(lookupFoldRow("   "), undefined);
+  it("survives leading pad and pi's per-line SEGMENT_RESET", () => {
+    const line = "  " + foldMarker("think-11") + "◆ Thought" + SEGMENT_RESET;
+    assert.equal(parseFoldMarker(line), "think-11");
   });
 
-  it("resolves ambiguous rows (2+ ids) as no-op", () => {
-    registerFoldRow("same line", "f1");
-    registerFoldRow("same line", "f2");
-    assert.equal(lookupFoldRow("same line"), undefined);
+  it("returns undefined when no marker is present", () => {
+    assert.equal(parseFoldMarker("◆ Thought"), undefined);
+    assert.equal(parseFoldMarker("hello" + SEGMENT_RESET), undefined);
   });
 
-  it("register later rows does not clobber earlier distinct rows", () => {
-    registerFoldRow("alpha", "f1");
-    registerFoldRow("beta", "f2");
-    assert.equal(lookupFoldRow("alpha"), "f1");
-    assert.equal(lookupFoldRow("beta"), "f2");
+  it("paints a marker only in fullscreen when click-fold is ready", () => {
+    const state = getState();
+    state.tuiMode = "fullscreen";
+    state.clickFoldReady = true;
+    const painted = withFoldMarker("  some body", "f1");
+    assert.equal(parseFoldMarker(painted), "f1");
+    assert.equal(painted.includes("\x1b]8;;"), false);
+    assert.ok(painted.startsWith(foldMarker("f1")));
+  });
+
+  it("does not paint in regular mode", () => {
+    const state = getState();
+    state.tuiMode = "regular";
+    state.clickFoldReady = true;
+    assert.equal(withFoldMarker("  some body", "f1"), "  some body");
+  });
+
+  it("skips blank rows", () => {
+    const state = getState();
+    state.tuiMode = "fullscreen";
+    state.clickFoldReady = true;
+    assert.equal(withFoldMarker("", "f1"), "");
+    assert.equal(withFoldMarker("   ", "f1"), "   ");
+  });
+
+  it("is idempotent for the same id", () => {
+    const state = getState();
+    state.tuiMode = "fullscreen";
+    state.clickFoldReady = true;
+    const once = withFoldMarker("body", "f1");
+    assert.equal(withFoldMarker(once, "f1"), once);
   });
 });
 
@@ -62,16 +78,13 @@ describe("markBodyFoldDeep", () => {
     const leaf = new Text("body", 0, 0);
     const box = { children: [leaf, { text: "no setText" }] };
     markBodyFoldDeep(box, "f1", []);
-    assert.equal(leaf.text, "body"); // marking is side-effect-free on text
+    assert.equal(leaf.text, "body");
   });
 
   it("skips titled chrome rows (skipMarks)", () => {
     const title = new Text("◆ Read", 0, 0);
     title.__piToolTitle = true;
-    const box = { children: [title] };
-    markBodyFoldDeep(box, "f1", ["__piToolTitle"]);
-    // skipMarks nodes are not registered — verify by rendering later in the
-    // patch test; here just ensure no throw and no registration of the text.
+    markBodyFoldDeep({ children: [title] }, "f1", ["__piToolTitle"]);
   });
 
   it("does not recurse into nested tools", () => {
@@ -81,9 +94,7 @@ describe("markBodyFoldDeep", () => {
       updateDisplay() {},
       children: [innerLeaf],
     };
-    const box = { children: [nestedTool] };
-    markBodyFoldDeep(box, "f1", []);
-    // The nested tool's leaf must not be marked; render it after patch install.
+    markBodyFoldDeep({ children: [nestedTool] }, "f1", []);
   });
 
   it("markBodyFold / unmarkBodyFold attach and detach an instance", () => {
@@ -101,51 +112,57 @@ describe("installFoldBodyTextPatch", () => {
     cleanup = undefined;
   });
 
-  it("registers marked Text rows for press lookup and nothing else", () => {
+  it("paints markers on marked Text rows only in fullscreen when ready", () => {
     cleanup = installFoldBodyTextPatch();
+    const state = getState();
+    state.tuiMode = "fullscreen";
+    state.clickFoldReady = true;
 
-    const marked = new Text("hello body", 1, 0);
-    markBodyFold(marked, "f2");
-    const plain = new Text("hello body", 1, 0);
-
-    assert.ok(marked.render(30).length > 0);
-    assert.equal(lookupFoldRow(" hello body "), "f2");
-
-    // plain Text was never marked: its rows must not be registered
-    plain.render(30);
-    // (same visual row as marked — but lookup is idempotent; distinct row:
-    // use a second unmarked text with unique content)
-    const other = new Text("never registered", 1, 0);
-    other.render(30);
-    assert.equal(lookupFoldRow("never registered"), undefined);
-  });
-
-  it("skips titled chrome rows and nested tools at render time", () => {
-    cleanup = installFoldBodyTextPatch();
-
-    const title = new Text("◆ Read `x.ts`", 0, 0);
-    title.__piToolTitle = true;
-    markBodyFoldDeep({ children: [title] }, "f3", ["__piToolTitle"]);
-    title.render(30);
-    assert.equal(lookupFoldRow("◆ Read `x.ts`"), undefined);
-  });
-
-  it("does not link OSC 8 into rendered rows (no underlines anywhere)", () => {
-    cleanup = installFoldBodyTextPatch();
     const marked = new Text("hello body", 1, 0);
     markBodyFold(marked, "f2");
     const lines = marked.render(30);
     assert.ok(lines.length > 0);
+    assert.equal(parseFoldMarker(lines[0]), "f2");
     assert.equal(lines[0].includes("\x1b]8;;"), false);
+
+    const other = new Text("never marked", 1, 0);
+    const otherLines = other.render(30);
+    assert.equal(parseFoldMarker(otherLines[0] ?? ""), undefined);
+  });
+
+  it("does not paint markers in regular mode", () => {
+    cleanup = installFoldBodyTextPatch();
+    const state = getState();
+    state.tuiMode = "regular";
+    state.clickFoldReady = true;
+    const marked = new Text("hello body", 1, 0);
+    markBodyFold(marked, "f2");
+    const lines = marked.render(30);
+    assert.equal(parseFoldMarker(lines[0] ?? ""), undefined);
+  });
+
+  it("skips titled chrome rows at render time", () => {
+    cleanup = installFoldBodyTextPatch();
+    const state = getState();
+    state.tuiMode = "fullscreen";
+    state.clickFoldReady = true;
+    const title = new Text("◆ Read `x.ts`", 0, 0);
+    title.__piToolTitle = true;
+    markBodyFoldDeep({ children: [title] }, "f3", ["__piToolTitle"]);
+    const lines = title.render(30);
+    assert.equal(parseFoldMarker(lines[0] ?? ""), undefined);
   });
 
   it("restores the original render after cleanup", () => {
     cleanup = installFoldBodyTextPatch();
+    const state = getState();
+    state.tuiMode = "fullscreen";
+    state.clickFoldReady = true;
     const marked = new Text("hello body", 1, 0);
     markBodyFold(marked, "f2");
     cleanup();
     cleanup = undefined;
-    marked.render(30);
-    assert.equal(lookupFoldRow("hello body"), undefined);
+    const lines = marked.render(30);
+    assert.equal(parseFoldMarker(lines[0] ?? ""), undefined);
   });
 });

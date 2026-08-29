@@ -18,7 +18,7 @@ import {
   isGrokFoldScheme,
   parseFoldId,
 } from "./click-fold-core.ts";
-import { installFoldBodyTextPatch, lookupFoldRow, registerFoldRow } from "./fold-body.ts";
+import { installFoldBodyTextPatch, parseFoldMarker, withFoldMarker } from "./fold-body.ts";
 import { getState } from "./state.ts";
 
 const handlers = new Map<string, () => void>();
@@ -89,10 +89,13 @@ export function injectFoldRow(
   const idx = Math.max(0, Math.min(rows.length - 1, y));
   const row = rows[idx];
   if (typeof row !== "string") return undefined;
-  const id = lookupFoldRow(row);
+  const id = parseFoldMarker(row);
   if (!id) return undefined;
   const saved = row;
-  rows[idx] = hyperlink(row, foldUrl(id));
+  // pi appends SEGMENT_RESET (`ESC[0m` + OSC 8 close) to every previousScreen
+  // row. Strip it so the injected hyperlink stays open across the visible cells.
+  const core = row.replace(/\x1b\[0m\x1b\]8;;(?:\x07|\x1b\\)$/, "");
+  rows[idx] = hyperlink(core, foldUrl(id));
   return () => {
     rows[idx] = saved;
   };
@@ -147,14 +150,11 @@ export function renderClickableChrome(
     typeof opts.id === "string" &&
     opts.id.length > 0 &&
     typeof opts.onClick === "function";
-  if (clickable) {
-    // No OSC 8 (Windows Terminal / xterm.js draw a persistent dotted underline
-    // on every hyperlink). Register the row's text instead; the mouse seam
-    // resolves it from the frame buffer on press.
-    registerFoldRow(truncated, opts.id!);
-    registerFoldHandler(opts.id!, opts.onClick!);
-  }
-  return truncated;
+  if (!clickable) return truncated;
+  registerFoldHandler(opts.id!, opts.onClick!);
+  // Paint a zero-width OSC 9999 marker (not a hyperlink) so press lookup
+  // survives pi's per-line SEGMENT_RESET without drawing underlines.
+  return withFoldMarker(truncated, opts.id!);
 }
 
 function wrapDoRender(

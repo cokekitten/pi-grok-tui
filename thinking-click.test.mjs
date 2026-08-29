@@ -8,7 +8,7 @@ import {
 } from "./extensions/thinking-click.ts";
 import { getState, resetClickFoldSession } from "./extensions/state.ts";
 import { dispatchGrokFoldUrl, resetFoldHandlers } from "./extensions/click-fold.ts";
-import { lookupFoldRow } from "./extensions/fold-body.ts";
+import { parseFoldMarker } from "./extensions/fold-body.ts";
 
 const theme = {
   fg(_color, text) {
@@ -58,7 +58,7 @@ describe("thinking click helpers", () => {
     // No OSC 8 in the row: no dotted underline on Windows Terminal / wetty.
     assert.equal(line.includes("\x1b]8;;"), false);
     assert.equal(line.includes("Alt+T") || line.includes("⌥T"), false);
-    assert.equal(lookupFoldRow(line), "think-11");
+    assert.equal(parseFoldMarker(line), "think-11");
     assert.equal(dispatchGrokFoldUrl("pi-grok-tui://v1/fold/think-11"), true);
     assert.equal(thinkingIsExpanded(11), true);
   });

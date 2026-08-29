@@ -17,7 +17,7 @@ import {
 } from "./chrome.js";
 import { getState } from "./state.js";
 import { thinkingFoldId } from "./click-fold.js";
-import { registerFoldRow } from "./fold-body.js";
+import { withFoldMarker } from "./fold-body.js";
 import { renderThinkingChromeLine, thinkingIsExpanded } from "./thinking-click.js";
 
 export const MAX_VISIBLE_LINES = 3;
@@ -139,10 +139,11 @@ export class ThinkingScrollComponent {
     });
     const body = rendered.map((l) => {
       if (l.trim() === "") return "";
-      // Body rows fold this block on press (no OSC 8 — registry lookup).
-      const row = `  ${bodyFg(stripAnsiLocal(l))}`;
-      registerFoldRow(row, thinkingFoldId(this.messageTimestamp));
-      return row;
+      // Body rows fold this block on press (zero-width OSC 9999 marker).
+      return withFoldMarker(
+        `  ${bodyFg(stripAnsiLocal(l))}`,
+        thinkingFoldId(this.messageTimestamp),
+      );
     });
     return [header, ...body];
   }

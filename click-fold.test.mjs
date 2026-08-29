@@ -15,7 +15,11 @@ import {
 } from "./extensions/click-fold.ts";
 import { getState, resetClickFoldSession } from "./extensions/state.ts";
 import { getOsc8LinkAtColumn } from "@earendil-works/pi-tui";
-import { lookupFoldRow, registerFoldRow, clearFoldRegistry } from "./extensions/fold-body.ts";
+import {
+  foldMarker,
+  parseFoldMarker,
+  clearFoldRegistry,
+} from "./extensions/fold-body.ts";
 
 const theme = {
   fg(_color, text) {
@@ -129,8 +133,7 @@ describe("renderClickableChrome", () => {
     // No OSC 8 in the emitted line: no dotted underlines on any terminal.
     assert.equal(line.includes("\x1b]8;;"), false);
     assert.equal(line.includes("Alt+T") || line.includes("⌥T"), false);
-    // The row resolves to the fold id from the press-lookup registry.
-    assert.equal(lookupFoldRow(line), "think-1");
+    assert.equal(parseFoldMarker(line), "think-1");
     assert.equal(dispatchGrokFoldUrl("pi-grok-tui://v1/fold/think-1"), true);
     assert.equal(clicks, 1);
   });
@@ -153,8 +156,8 @@ describe("renderClickableChrome", () => {
 
 describe("injectFoldRow", () => {
   it("injects a fold hyperlink at y and restores the original row", () => {
-    registerFoldRow("  some body row", "f9");
-    const rows = ["first", "  some body row", "third"];
+    const painted = foldMarker("f9") + "  some body row";
+    const rows = ["first", painted + "\x1b[0m\x1b]8;;\x07", "third"];
     const restore = injectFoldRow(rows, 1);
     assert.ok(restore);
     // pi's press now resolves the fold URL from the injected buffer.
@@ -163,7 +166,7 @@ describe("injectFoldRow", () => {
       "pi-grok-tui://v1/fold/f9",
     );
     restore();
-    assert.equal(rows[1], "  some body row");
+    assert.equal(rows[1], painted + "\x1b[0m\x1b]8;;\x07");
   });
 
   it("no-ops without a registered row, out-of-bounds y, or non-string rows", () => {

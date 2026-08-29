@@ -1,56 +1,50 @@
 /**
- * Body click-to-collapse — OSC 8-free row registry.
+ * Body click-to-collapse — OSC 8-free fold identity painted into the row.
  *
  * Windows Terminal and xterm.js (wetty) render every OSC 8 hyperlink with a
- * persistent dotted underline that cannot be disabled (SGR 24m has no effect),
- * so emitting fold links on every expanded body row turns the whole screen
- * into horizontal dashed lines on those terminals.
+ * persistent dotted underline that cannot be disabled. Grok Build's pager
+ * avoids that by recording hit identity with the painted cells and routing
+ * mouse-down against those cells (no hyperlinks on screen).
  *
- * Instead we never emit OSC 8 for grok folds. Rendering hooks register the
- * *final row text* (normalized: ANSI stripped, whitespace trimmed) → fold id.
- * On a mouse *press*, TuiAltScreen's intercepted handler temporarily injects
- * the fold hyperlink into the `previousScreen` row buffer pi already consults
- * for `pressedUrl`; PI resolves the URL, the release triggers the fold exactly
- * as before. The injected row is restored in a `finally`, so nothing OSC 8
- * ever reaches the screen — no underlines on any terminal.
+ * We do the same in pi: a private OSC 9999 marker (zero-width, ignored by
+ * terminals that don't implement it) carries the fold id. On press,
+ * TuiAltScreen's seam reads the marker from `previousScreen[y]`, injects an
+ * OSC 8 hyperlink into that *buffer* for the duration of pi's pressedUrl
+ * lookup, then restores. The screen never receives OSC 8.
  *
- * Collisions: a normalized row registered by 2+ different fold ids resolves to
- * no-op (safe), so identical repeated command echoes stay inert.
+ * Markers also survive pi's per-line SEGMENT_RESET (`ESC[0m` + OSC 8 close)
+ * which made text-registry lookup miss every click.
  */
 import { Text } from "@earendil-works/pi-tui";
 import { getState } from "./state.ts";
 
-/** normalized row text → fold ids that registered it */
-const rowRegistry = new Map<string, Set<string>>();
+const FOLD_MARKER_RE =
+  /\x1b\]9999;pi-grok-tui\/v1\/fold\/([A-Za-z0-9:_-]+)\x07/;
 
-export function clearFoldRegistry(): void {
-  rowRegistry.clear();
+export function foldMarker(id: string): string {
+  return `\x1b]9999;pi-grok-tui/v1/fold/${id}\x07`;
 }
 
-export function normalizeFoldRow(line: string): string {
-  // Compact trivial ANSI (SGR) escapes; OSC sequences do not appear in rows
-  // we render (grok folds are OSC 8-free by design).
-  // eslint-disable-next-line no-control-regex
-  return line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").trim();
+/** Extract the fold id painted into a rendered (or previousScreen) row. */
+export function parseFoldMarker(line: string): string | undefined {
+  const m = FOLD_MARKER_RE.exec(line);
+  return m?.[1];
 }
 
-export function registerFoldRow(line: string, id: string): void {
-  const key = normalizeFoldRow(line);
-  if (!key) return;
-  let ids = rowRegistry.get(key);
-  if (!ids) {
-    ids = new Set();
-    rowRegistry.set(key, ids);
-  }
-  ids.add(id);
+/**
+ * Prefix a final render row with the fold marker (gated; empty rows skipped).
+ * Idempotent for the same id.
+ */
+export function withFoldMarker(line: string, id: string): string {
+  const state = getState();
+  if (state.tuiMode !== "fullscreen" || !state.clickFoldReady) return line;
+  if (line.trim() === "") return line;
+  if (parseFoldMarker(line) === id) return line;
+  return foldMarker(id) + line;
 }
 
-/** Resolve a press row to a fold id. Ambiguous (2+ ids) ⇒ no-op. */
-export function lookupFoldRow(line: string): string | undefined {
-  const ids = rowRegistry.get(normalizeFoldRow(line));
-  if (!ids || ids.size !== 1) return undefined;
-  return ids.values().next().value as string | undefined;
-}
+/** Session reset: markers live in painted rows, so there is nothing to drop. */
+export function clearFoldRegistry(): void {}
 
 /** Mark a Text instance (e.g. contentText that holds title+body rows). */
 export function markBodyFold(node: object, id: string): void {
@@ -99,7 +93,7 @@ function registerTextInstance(node: object, id: string): void {
   textInstances.set(node, id);
 }
 
-/** Patch pi Text rendering: marked instances register their rows for press lookup. */
+/** Patch pi Text rendering: marked instances paint fold markers on output rows. */
 export function installFoldBodyTextPatch(): () => void {
   const proto = Text.prototype as unknown as {
     render?: (width: number) => string[];
@@ -110,10 +104,7 @@ export function installFoldBodyTextPatch(): () => void {
     const lines = original.call(this, width);
     const id = textInstances.get(this);
     if (!id) return lines;
-    for (const line of lines) {
-      registerFoldRow(line, id);
-    }
-    return lines;
+    return lines.map((l) => withFoldMarker(l, id));
   };
   return () => {
     proto.render = original;
