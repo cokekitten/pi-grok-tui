@@ -224,6 +224,7 @@ export default function (pi: ExtensionAPI) {
     state.globalExpanded = false;
     resetClickFoldSession();
     resetFoldHandlers();
+    clearFoldRegistry();
 
     // Re-bind raw Option+T listener every session (rebind clears UI listeners).
     try {
@@ -321,6 +322,7 @@ export default function (pi: ExtensionAPI) {
     state.globalExpanded = false;
     resetClickFoldSession();
     resetFoldHandlers();
+    clearFoldRegistry();
     detachTerminalInput();
 
     if ((event.reason === "reload" || event.reason === "quit") && state.patchRelease) {

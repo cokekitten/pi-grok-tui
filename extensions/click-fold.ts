@@ -18,7 +18,7 @@ import {
   isGrokFoldScheme,
   parseFoldId,
 } from "./click-fold-core.ts";
-import { installFoldBodyTextPatch } from "./fold-body.ts";
+import { installFoldBodyTextPatch, lookupFoldRow, registerFoldRow } from "./fold-body.ts";
 import { getState } from "./state.ts";
 
 const handlers = new Map<string, () => void>();
@@ -76,6 +76,28 @@ type OpenUrlHost = {
   requestRender?: (force?: boolean) => void;
 };
 
+/**
+ * Temporarily inject the fold hyperlink for the row at `y` into a frame-buffer
+ * row array (pi's previousScreen). Returns a restore function, or undefined
+ * when the row is not a registered fold row.
+ */
+export function injectFoldRow(
+  rows: unknown[] | undefined,
+  y: number,
+): (() => void) | undefined {
+  if (!Array.isArray(rows) || rows.length === 0) return undefined;
+  const idx = Math.max(0, Math.min(rows.length - 1, y));
+  const row = rows[idx];
+  if (typeof row !== "string") return undefined;
+  const id = lookupFoldRow(row);
+  if (!id) return undefined;
+  const saved = row;
+  rows[idx] = hyperlink(row, foldUrl(id));
+  return () => {
+    rows[idx] = saved;
+  };
+}
+
 /** Swap openUrl for the duration of `fn` so grok fold URLs never hit the browser. */
 export function withFoldOpenUrl<T>(host: OpenUrlHost, fn: () => T): T {
   const previous = host.openUrl;
@@ -122,18 +144,17 @@ export function renderClickableChrome(
   });
   const truncated = truncateToWidth(styled, Math.max(1, width), "");
   const clickable =
-    state.tuiMode === "fullscreen" &&
-    state.clickFoldReady &&
     typeof opts.id === "string" &&
     opts.id.length > 0 &&
     typeof opts.onClick === "function";
-  if (!clickable) return truncated;
-  registerFoldHandler(opts.id!, opts.onClick!);
-  try {
-    return hyperlink(truncated, foldUrl(opts.id!));
-  } catch {
-    return truncated;
+  if (clickable) {
+    // No OSC 8 (Windows Terminal / xterm.js draw a persistent dotted underline
+    // on every hyperlink). Register the row's text instead; the mouse seam
+    // resolves it from the frame buffer on press.
+    registerFoldRow(truncated, opts.id!);
+    registerFoldHandler(opts.id!, opts.onClick!);
   }
+  return truncated;
 }
 
 function wrapDoRender(
@@ -176,7 +197,24 @@ export function installClickFoldPatch(): () => void {
   }
 
   altProto.handleSelectionMouseEvent = function (this: OpenUrlHost, event: unknown) {
-    return withFoldOpenUrl(this, () => originalMouse.call(this, event));
+    // On unmoved press, pi reads getOsc8LinkAtColumn from previousScreen to
+    // compute pressedUrl. Inject the fold hyperlink into that buffer for the
+    // duration of the call: the press resolves the fold URL, the release
+    // dispatches it, and the screen never receives any OSC 8 (no dotted
+    // underlines on Windows Terminal / wetty).
+    let restoreRow: (() => void) | undefined;
+    const ev = event as { release?: boolean; y?: number } | undefined;
+    if (ev && !ev.release && typeof ev.y === "number") {
+      restoreRow = injectFoldRow(
+        (this as { previousScreen?: unknown[] }).previousScreen,
+        ev.y,
+      );
+    }
+    try {
+      return withFoldOpenUrl(this, () => originalMouse.call(this, event));
+    } finally {
+      restoreRow?.();
+    }
   };
 
   // Body fold links are gated on clickFoldReady at render time, so the Text

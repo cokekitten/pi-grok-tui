@@ -17,7 +17,7 @@ import {
 } from "./chrome.js";
 import { getState } from "./state.js";
 import { thinkingFoldId } from "./click-fold.js";
-import { wrapFoldBodyLine } from "./fold-body.js";
+import { registerFoldRow } from "./fold-body.js";
 import { renderThinkingChromeLine, thinkingIsExpanded } from "./thinking-click.js";
 
 export const MAX_VISIBLE_LINES = 3;
@@ -139,12 +139,10 @@ export class ThinkingScrollComponent {
     });
     const body = rendered.map((l) => {
       if (l.trim() === "") return "";
-      // Body shares the header's fold link: an unmoved click inside the
-      // expanded thinking folds this block (fullscreen only).
-      return wrapFoldBodyLine(
-        `  ${bodyFg(stripAnsiLocal(l))}`,
-        thinkingFoldId(this.messageTimestamp),
-      );
+      // Body rows fold this block on press (no OSC 8 — registry lookup).
+      const row = `  ${bodyFg(stripAnsiLocal(l))}`;
+      registerFoldRow(row, thinkingFoldId(this.messageTimestamp));
+      return row;
     });
     return [header, ...body];
   }
