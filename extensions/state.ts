@@ -21,6 +21,8 @@ export interface ThinkingScrollState {
   tuiMode: TuiMode;
   /** True only while TuiAltScreen click intercept is installed. */
   clickFoldReady: boolean;
+  /** Fold id under the pointer in fullscreen, if any. */
+  hoveredFoldId?: string;
   /** Per-thinking-block expand overrides keyed by message timestamp. */
   thinkingOverrides: Map<number, boolean>;
   /** Per-tool / custom-message view overrides. */
@@ -53,6 +55,9 @@ function ensureClickFoldState(state: ThinkingScrollState): ThinkingScrollState {
   if (!(state.expandedGroupHeaders instanceof WeakSet)) {
     state.expandedGroupHeaders = new WeakSet();
   }
+  if (typeof state.hoveredFoldId !== "string") {
+    state.hoveredFoldId = undefined;
+  }
   return state;
 }
 
@@ -73,6 +78,7 @@ export function getState(): ThinkingScrollState {
     toolViewMode: "chrome",
     tuiMode: "regular",
     clickFoldReady: false,
+    hoveredFoldId: undefined,
     thinkingOverrides: new Map(),
     viewOverrides: new WeakMap(),
     expandedGroupHeaders: new WeakSet(),
@@ -88,6 +94,7 @@ export function resetClickFoldSession(): void {
   state.thinkingOverrides = new Map();
   state.viewOverrides = new WeakMap();
   state.expandedGroupHeaders = new WeakSet();
+  state.hoveredFoldId = undefined;
 }
 
 /** Ctrl+O: forget tool/custom/group clicks; keep thinking overrides. */

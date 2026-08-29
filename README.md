@@ -10,7 +10,7 @@ Grok-flavored TUI for [pi](https://github.com/earendil-works/pi-coding-agent) �
 
 - While the model is thinking: live scrolling view with at most **3** visible lines (Markdown preserved).
 - When thinking finishes: always collapses to a single row — **`◆ Thought`**.
-- In **fullscreen**, click that row to expand/collapse **this** thinking block. When expanded, click **anywhere in the thinking text** to collapse it back (no need to hit the title row). Keyboard still toggles all thinking: **`⌥T`** (macOS Option+T → †), **`Alt+T`**, or **`Ctrl+Shift+H`**.
+- In **fullscreen**, click that row to expand/collapse **this** thinking block. When expanded, click **anywhere in the thinking text** to collapse it back (no need to hit the title row). Hovering the title or body highlights the **whole block**. Keyboard still toggles all thinking: **`⌥T`** (macOS Option+T → †), **`Alt+T`**, or **`Ctrl+Shift+H`**.
 - Regular TUI keeps the **`(⌥T)` / `(Alt+T)`** hint (clicks are not captured there).
 
 ### Tools (Grok-style titles)
@@ -19,7 +19,7 @@ Grok-flavored TUI for [pi](https://github.com/earendil-works/pi-coding-agent) �
 - Status diamonds: muted while running, green on success, red on failure.
 - Consecutive collapsible tools **merge** into a Grok-style header, e.g. `◇ Read 2 files` or `◇ Ran 1 command · 1 failed`.
 - **`edit` / `write` stay expanded** by default (full diff/content, native highlighting; background blocks removed).
-- In **fullscreen**, click chrome to fold that row (Read → preview; other tools → full). Click a group header to split/merge the group; click a member to open only that member. When a tool is expanded, click **anywhere in its output** to fold it back to the title row.
+- In **fullscreen**, click chrome to fold that row (Read → preview; other tools → full). Click a group header to split/merge the group; click a member to open only that member. When a tool is expanded, click **anywhere in its output** to fold it back to the title row. Hovering a chrome or body row highlights that **whole block** (group header vs member stay separate).
 - **`Ctrl+O` cycles three global views** (and clears per-row tool clicks):
   1. **compact** — one-line chrome (default)
   2. **preview** — pi’s original truncated tool output
@@ -76,6 +76,7 @@ After installing, restart pi or run `/reload`.
 | Click expanded thinking text (fullscreen) | Collapse that thinking block |
 | Click tool / group chrome (fullscreen) | Fold that row or split/merge the group |
 | Click expanded tool output (fullscreen) | Fold that tool back to its title |
+| Hover a foldable block (fullscreen) | Highlight the whole block |
 | `⌥T` / `Alt+T` / `Ctrl+Shift+H` | Expand/collapse all thinking |
 | `Ctrl+O` | Cycle tool views (compact → preview → full) |
 

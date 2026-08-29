@@ -42,6 +42,7 @@ export class ThinkingScrollComponent {
   private cachedActive?: boolean;
   private cachedTuiMode?: string;
   private cachedClickFoldReady?: boolean;
+  private cachedHoveredFoldId?: string;
   private cachedMarkdownKey?: string;
   private cachedMarkdownLines?: string[];
 
@@ -68,6 +69,7 @@ export class ThinkingScrollComponent {
       this.cachedActive === isActive &&
       this.cachedTuiMode === state.tuiMode &&
       this.cachedClickFoldReady === state.clickFoldReady &&
+      this.cachedHoveredFoldId === state.hoveredFoldId &&
       this.lastRenderedText === fullText
     ) {
       return this.cachedLines;
@@ -79,6 +81,7 @@ export class ThinkingScrollComponent {
     this.cachedActive = isActive;
     this.cachedTuiMode = state.tuiMode;
     this.cachedClickFoldReady = state.clickFoldReady;
+    this.cachedHoveredFoldId = state.hoveredFoldId;
 
     let lines: string[];
     if (isActive) {
@@ -143,6 +146,7 @@ export class ThinkingScrollComponent {
       return withFoldMarker(
         `  ${bodyFg(stripAnsiLocal(l))}`,
         thinkingFoldId(this.messageTimestamp),
+        width,
       );
     });
     return [header, ...body];
@@ -225,6 +229,7 @@ export class ThinkingScrollComponent {
     this.lastRenderedText = "";
     this.cachedTuiMode = undefined;
     this.cachedClickFoldReady = undefined;
+    this.cachedHoveredFoldId = undefined;
     this.cachedMarkdownKey = undefined;
     this.cachedMarkdownLines = undefined;
   }

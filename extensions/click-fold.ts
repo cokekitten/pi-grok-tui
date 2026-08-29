@@ -81,6 +81,29 @@ type OpenUrlHost = {
  * row array (pi's previousScreen). Returns a restore function, or undefined
  * when the row is not a registered fold row.
  */
+/** Motion / leave: set hoveredFoldId from the marked row at y. Returns true if it changed. */
+export function handleFoldHover(
+  rows: unknown[] | undefined,
+  y: number | undefined,
+): boolean {
+  const state = getState();
+  if (!state.clickFoldReady || state.tuiMode !== "fullscreen") return false;
+  let next: string | undefined;
+  if (
+    Array.isArray(rows) &&
+    rows.length > 0 &&
+    typeof y === "number" &&
+    Number.isFinite(y)
+  ) {
+    const idx = Math.max(0, Math.min(rows.length - 1, y));
+    const row = rows[idx];
+    if (typeof row === "string") next = parseFoldMarker(row);
+  }
+  if (state.hoveredFoldId === next) return false;
+  state.hoveredFoldId = next;
+  return true;
+}
+
 export function injectFoldRow(
   rows: unknown[] | undefined,
   y: number,
@@ -154,7 +177,7 @@ export function renderClickableChrome(
   registerFoldHandler(opts.id!, opts.onClick!);
   // Paint a zero-width OSC 9999 marker (not a hyperlink) so press lookup
   // survives pi's per-line SEGMENT_RESET without drawing underlines.
-  return withFoldMarker(truncated, opts.id!);
+  return withFoldMarker(truncated, opts.id!, width);
 }
 
 function wrapDoRender(
@@ -164,7 +187,9 @@ function wrapDoRender(
   const original = Ctor.prototype.doRender;
   if (typeof original !== "function") return undefined;
   Ctor.prototype.doRender = function (this: unknown) {
-    getState().tuiMode = mode;
+    const state = getState();
+    state.tuiMode = mode;
+    if (mode === "regular") state.hoveredFoldId = undefined;
     return original.call(this);
   };
   return () => {
@@ -178,9 +203,11 @@ export function installClickFoldPatch(): () => void {
 
   const altProto = TuiAltScreen.prototype as unknown as {
     handleSelectionMouseEvent?: (event: unknown) => unknown;
+    handleViewportInput?: (data: string) => unknown;
     doRender?: () => void;
   };
   const originalMouse = altProto.handleSelectionMouseEvent;
+  const originalViewport = altProto.handleViewportInput;
   const restoreAltRender = wrapDoRender(TuiAltScreen, "fullscreen");
   const restoreMainRender = wrapDoRender(TuiMainScreen, "regular");
 
@@ -196,19 +223,45 @@ export function installClickFoldPatch(): () => void {
     };
   }
 
+  if (typeof originalViewport === "function") {
+    altProto.handleViewportInput = function (this: OpenUrlHost, data: string) {
+      if (data === "\x1b[O" && handleFoldHover(undefined, undefined)) {
+        try {
+          this.requestRender?.();
+        } catch {
+          /* ignore */
+        }
+      }
+      return originalViewport.call(this, data);
+    };
+  }
+
   altProto.handleSelectionMouseEvent = function (this: OpenUrlHost, event: unknown) {
+    const ev = event as {
+      release?: boolean;
+      y?: number;
+      button?: number;
+    } | undefined;
+    const rows = (this as { previousScreen?: unknown[] }).previousScreen;
+    const motion = !!(ev && (ev.button ?? 0) & 32);
+    const dragging = !!(this as { selectionPressActive?: boolean }).selectionPressActive;
+    if (!dragging && ev && typeof ev.y === "number" && (ev.release || motion)) {
+      if (handleFoldHover(rows, ev.y)) {
+        try {
+          this.requestRender?.();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
     // On unmoved press, pi reads getOsc8LinkAtColumn from previousScreen to
     // compute pressedUrl. Inject the fold hyperlink into that buffer for the
     // duration of the call: the press resolves the fold URL, the release
     // dispatches it, and the screen never receives any OSC 8 (no dotted
     // underlines on Windows Terminal / wetty).
     let restoreRow: (() => void) | undefined;
-    const ev = event as { release?: boolean; y?: number } | undefined;
-    if (ev && !ev.release && typeof ev.y === "number") {
-      restoreRow = injectFoldRow(
-        (this as { previousScreen?: unknown[] }).previousScreen,
-        ev.y,
-      );
+    if (ev && !ev.release && !motion && typeof ev.y === "number") {
+      restoreRow = injectFoldRow(rows, ev.y);
     }
     try {
       return withFoldOpenUrl(this, () => originalMouse.call(this, event));
@@ -226,8 +279,12 @@ export function installClickFoldPatch(): () => void {
   return () => {
     restoreBodyText();
     altProto.handleSelectionMouseEvent = originalMouse;
+    if (typeof originalViewport === "function") {
+      altProto.handleViewportInput = originalViewport;
+    }
     restoreAltRender();
     restoreMainRender();
     state.clickFoldReady = false;
+    state.hoveredFoldId = undefined;
   };
 }
