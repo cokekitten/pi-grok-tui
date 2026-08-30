@@ -6,6 +6,7 @@ import { groupRunRange, nextToolFoldMode, type GroupSibling } from "./click-fold
 import {
   groupFoldId,
   idForTarget,
+  registerFoldHandler,
   renderClickableChrome,
 } from "./click-fold.ts";
 import {
@@ -28,8 +29,25 @@ export function toolChromeKind(status: {
 }
 
 export function effectiveToolMode(target: object, toolName: string): ToolViewMode {
+  if (toolName === "write") {
+    const mode = getViewOverride(target) ?? getToolViewMode();
+    return mode === "chrome" ? "truncated" : mode;
+  }
   if (!isCollapsibleTool(toolName)) return "full";
   return getViewOverride(target) ?? getToolViewMode();
+}
+
+/** Register a body-click fold target for native preview tools (write). */
+export function nativePreviewFoldId(
+  target: object,
+  toolName: string,
+): string | undefined {
+  if (toolName !== "write") return undefined;
+  const id = idForTarget(target);
+  registerFoldHandler(id, () => {
+    toggleToolAt(target, toolName);
+  });
+  return id;
 }
 
 export function toggleToolAt(target: object, toolName: string): ToolViewMode {

@@ -3,7 +3,7 @@
  * Pure helpers — no TUI imports so they can be unit-tested with node:test.
  */
 
-/** Tools that stay fully expanded after finish (Grok Edit default). */
+/** Tools that never collapse to grok title-only chrome (native body stays). */
 const ALWAYS_EXPANDED_TOOLS = new Set(["edit", "write"]);
 
 /** Max code-point length for a single-line title body. */

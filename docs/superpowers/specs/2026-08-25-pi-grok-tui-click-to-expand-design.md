@@ -18,7 +18,7 @@ Display-only. Keyboard shortcuts stay. Regular TUI mode is unchanged except that
 | Gesture | **Single click** on the chrome title row (`◆` / `◇` line). Not the body. |
 | Why not Grok’s double-click | Pi fullscreen already uses double-click for word selection and has no “single-click selects the block” layer. |
 | Scope | **Point-at-what-you-open**: one thinking block, one tool, one custom-message row, or one verb group. |
-| Grok fold mapping (finished) | Thought: collapsed ↔ full. Read: chrome ↔ truncated. Other collapsible tools + custom messages: chrome ↔ full. `edit` / `write`: never title-only. |
+| Grok fold mapping (finished) | Thought: collapsed ↔ full. Read: chrome ↔ truncated. Other collapsible tools + custom messages: chrome ↔ full. `write`: native 10-line preview ↔ full (never title-only). `edit`: always full, not clickable. |
 | Verb groups | Click collapsed group header → split into per-member chrome rows (bodies still collapsed). Click expanded group header → fold the group. Click a member row → fold that member only. |
 | Hints | Fullscreen: **no** trailing `(⌥T)` / `(Ctrl+O)` on chrome. Regular: keep them. |
 | Regular mode | No custom OSC 8. No mouse fold. Keyboard only. |
@@ -85,7 +85,7 @@ Click uses the **currently displayed** mode, not the global flag:
 | truncated | chrome | chrome |
 | full | chrome | chrome |
 
-`edit` / `write`: no chrome click target; native expanded render unchanged.
+`write`: no grok title-only chrome. Default (and global compact) is native 10-line preview (`truncated`). Click **anywhere in the write block** (fullscreen) → full; click again → preview. `edit`: no click target; native full diff unchanged.
 
 Running collapsible tools that are already title-only **are** clickable (peek output). Failure chrome is clickable the same way.
 
@@ -222,7 +222,7 @@ Pi documents that each rendered line is closed with OSC 8 reset; wrapping a sing
 | Kind | Key | Default (no override) |
 |------|-----|------------------------|
 | Thinking | message `timestamp` | `state.globalExpanded` |
-| Tool | component instance (WeakMap) | `state.toolViewMode` mapped onto that tool (`edit`/`write` ignored) |
+| Tool | component instance (WeakMap) | `state.toolViewMode` mapped onto that tool (`edit` ignored / always full; `write` maps global `chrome` → `truncated`) |
 | Custom message | component instance | chrome iff `toolViewMode === "chrome"` |
 | Group expanded | group id (first member’s instance id, or ordered member-id tuple) | collapsed |
 
@@ -280,7 +280,7 @@ Manual checklist (fullscreen):
 8. Drag chrome copies text, does not fold.
 9. https links in the transcript still open in the browser.
 10. `/settings` → regular: hints return, custom links gone; back to fullscreen: hints gone, clicks work.
-11. `edit`/`write` still native-expanded, not title-only.
+11. `write` defaults to native 10-line preview (not title-only); fullscreen click anywhere toggles preview ↔ full. `edit` stays full and is not clickable.
 
 ## Implementation notes
 
@@ -296,4 +296,4 @@ Manual checklist (fullscreen):
 - Per-row fold in regular mode (needs a different seam; mouse is not captured).
 - Debouncing double-click on chrome so the second click does not re-collapse.
 - Optional truncated step for non-Read tools on click.
-- Click-to-fold `edit`/`write` when the user has collapsed them via some future setting.
+- Click-to-fold `edit` (native diff has no truncated step).

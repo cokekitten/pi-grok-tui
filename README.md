@@ -18,7 +18,8 @@ Grok-flavored TUI for [pi](https://github.com/earendil-works/pi-coding-agent) �
 - Collapsible tools (**not** `edit`/`write`): **always title-only** while collapsed — including while running (no process/output body).
 - Status diamonds: muted while running, green on success, red on failure.
 - Consecutive collapsible tools **merge** into a Grok-style header, e.g. `◇ Read 2 files` or `◇ Ran 1 command · 1 failed`.
-- **`edit` / `write` stay expanded** by default (full diff/content, native highlighting; background blocks removed).
+- **`write` stays native preview** by default (first 10 lines, syntax highlighting; background blocks removed). In **fullscreen**, click **anywhere in the write block** to expand to full content; click again to return to the 10-line preview. Compact global mode maps write to that preview — never a grok title-only row.
+- **`edit` stays fully expanded** (full diff, native highlighting; background blocks removed) and is **not** click-to-fold.
 - In **fullscreen**, click chrome to fold that row (Read → preview; other tools → full). Click a group header to split/merge the group; click a member to open only that member. When a tool is expanded, click **anywhere in its output** to fold it back to the title row. Hovering a chrome or body row highlights that **whole block** (group header vs member stay separate).
 - **`Ctrl+O` cycles three global views** (and clears per-row tool clicks):
   1. **compact** — one-line chrome (default)
@@ -76,6 +77,7 @@ After installing, restart pi or run `/reload`.
 | Click expanded thinking text (fullscreen) | Collapse that thinking block |
 | Click tool / group chrome (fullscreen) | Fold that row or split/merge the group |
 | Click expanded tool output (fullscreen) | Fold that tool back to its title |
+| Click write block (fullscreen) | Toggle native 10-line preview ↔ full |
 | Hover a foldable block (fullscreen) | Highlight the whole block |
 | `⌥T` / `Alt+T` / `Ctrl+Shift+H` | Expand/collapse all thinking |
 | `Ctrl+O` | Cycle tool views (compact → preview → full) |

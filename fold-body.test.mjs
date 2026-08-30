@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { Text } from "@earendil-works/pi-tui";
+import { Box, Text } from "@earendil-works/pi-tui";
 import {
   foldMarker,
   parseFoldMarker,
@@ -101,6 +101,32 @@ describe("markBodyFoldDeep", () => {
     const leaf = new Text("attach me", 0, 0);
     markBodyFold(leaf, "f1");
     unmarkBodyFold(leaf);
+  });
+
+  it("marks a write-style Text subclass inside a Box", () => {
+    const cleanup = installFoldBodyTextPatch();
+    try {
+      const state = getState();
+      state.tuiMode = "fullscreen";
+      state.clickFoldReady = true;
+      class WriteLike extends Text {
+        constructor() {
+          super("write foo.ts\nline1\nline2", 0, 0);
+        }
+      }
+      const box = new Box(0, 0);
+      const child = new WriteLike();
+      box.addChild(child);
+      markBodyFoldDeep(box, "write-1", []);
+      const lines = box.render(40);
+      assert.ok(lines.length >= 3);
+      for (const line of lines) {
+        if (line.trim() === "") continue;
+        assert.equal(parseFoldMarker(line), "write-1");
+      }
+    } finally {
+      cleanup();
+    }
   });
 });
 

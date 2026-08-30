@@ -24,6 +24,7 @@ import {
   clickableChromeChild,
   collapsibleRun,
   effectiveToolMode,
+  nativePreviewFoldId,
   toolChromeKind,
 } from "./tool-click.js";
 import { idForTarget } from "./click-fold.js";
@@ -334,8 +335,8 @@ function restyleExpanded(
   applyLeadSpacer(self, true);
   stripBgDeep(self);
 
-  // edit/write are always-expanded Grok-style: native renderer owns the body
-  // (syntax + diff highlights). We only remove toolSuccessBg/errorBg blocks.
+  // edit/write keep the native renderer (syntax + diff highlights). We only
+  // remove toolSuccessBg/errorBg blocks. write can still fold preview ↔ full.
   const preserveNativeBody = !isCollapsibleTool(self.toolName);
 
   const kind = toolChromeKind({
@@ -360,6 +361,8 @@ function restyleExpanded(
     if (preserveNativeBody) {
       // Do not inject chrome title over native "edit path" / do not dimBody —
       // that would strip ANSI diff/syntax colors.
+      const foldId = nativePreviewFoldId(self, self.toolName);
+      if (foldId) markBodyFoldDeep(rc, foldId, []);
       self.hideComponent = false;
       return;
     }
@@ -427,6 +430,8 @@ function restyleExpanded(
       } catch {
         /* ignore */
       }
+      const foldId = nativePreviewFoldId(self, self.toolName);
+      if (foldId) markBodyFold(self.contentText, foldId);
     }
   }
 
@@ -567,7 +572,7 @@ export async function installToolCollapsePatch(): Promise<() => void> {
 
       // ── preview / full body (including expanded group members)
       if (!titleOnly) {
-        if (isCollapsibleTool(this.toolName)) {
+        if (isCollapsibleTool(this.toolName) || this.toolName === "write") {
           const wantExpanded = effectiveToolMode(this, this.toolName) === "full";
           if (this.expanded !== wantExpanded) {
             this.expanded = wantExpanded;

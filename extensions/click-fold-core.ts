@@ -47,6 +47,8 @@ export function nextToolFoldMode(
   toolName: string,
   current: ToolViewMode,
 ): ToolViewMode {
+  // Native write preview (10 lines) ↔ full; never title-only chrome.
+  if (toolName === "write") return current === "full" ? "truncated" : "full";
   if (!isCollapsibleTool(toolName)) return current;
   if (current === "chrome") return toolName === "read" ? "truncated" : "full";
   return "chrome";

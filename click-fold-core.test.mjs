@@ -78,6 +78,14 @@ describe("fold modes", () => {
     assert.equal(nextToolFoldMode("grep", "chrome"), "full");
     assert.equal(nextToolFoldMode("custom", "chrome"), "full");
     assert.equal(nextToolFoldMode("edit", "chrome"), "chrome");
+    assert.equal(nextToolFoldMode("edit", "truncated"), "truncated");
+    assert.equal(nextToolFoldMode("edit", "full"), "full");
+  });
+
+  it("maps write preview to full and full back to truncated, never chrome", () => {
+    assert.equal(nextToolFoldMode("write", "chrome"), "full");
+    assert.equal(nextToolFoldMode("write", "truncated"), "full");
+    assert.equal(nextToolFoldMode("write", "full"), "truncated");
   });
 });
 
@@ -89,10 +97,12 @@ describe("groupRunRange", () => {
       { kind: "gap" },
       { kind: "tool", toolName: "read" },
       { kind: "tool", toolName: "edit" },
+      { kind: "tool", toolName: "write" },
     ];
     assert.deepEqual(groupRunRange(siblings, 1, true), { start: 1, end: 3 });
     assert.deepEqual(groupRunRange(siblings, 3, true), { start: 1, end: 3 });
     assert.equal(groupRunRange(siblings, 4, true), undefined);
+    assert.equal(groupRunRange(siblings, 5, true), undefined);
     assert.equal(groupRunRange(siblings, 1, false), undefined);
   });
 });
