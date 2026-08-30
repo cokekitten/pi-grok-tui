@@ -3,6 +3,8 @@
  */
 import {
   hyperlink,
+  sliceByColumn,
+  stripTerminalSequences,
   truncateToWidth,
   TuiAltScreen,
   TuiMainScreen,
@@ -19,6 +21,7 @@ import {
   parseFoldId,
 } from "./click-fold-core.ts";
 import { installFoldBodyTextPatch, parseFoldMarker, withFoldMarker } from "./fold-body.ts";
+import { isHitAt, parseHitSpan } from "./jump-bottom-core.ts";
 import { getState } from "./state.ts";
 
 const handlers = new Map<string, () => void>();
@@ -76,15 +79,11 @@ type OpenUrlHost = {
   requestRender?: (force?: boolean) => void;
 };
 
-/**
- * Temporarily inject the fold hyperlink for the row at `y` into a frame-buffer
- * row array (pi's previousScreen). Returns a restore function, or undefined
- * when the row is not a registered fold row.
- */
 /** Motion / leave: set hoveredFoldId from the marked row at y. Returns true if it changed. */
 export function handleFoldHover(
   rows: unknown[] | undefined,
   y: number | undefined,
+  x?: number,
 ): boolean {
   const state = getState();
   if (!state.clickFoldReady || state.tuiMode !== "fullscreen") return false;
@@ -97,13 +96,48 @@ export function handleFoldHover(
   ) {
     const idx = Math.max(0, Math.min(rows.length - 1, y));
     const row = rows[idx];
-    if (typeof row === "string") next = parseFoldMarker(row);
+    if (typeof row === "string") {
+      const span = parseHitSpan(row);
+      if (span && isHitAt(span, x ?? Number.NaN)) next = span.id;
+      else next = parseFoldMarker(row);
+    }
   }
   if (state.hoveredFoldId === next) return false;
   state.hoveredFoldId = next;
   return true;
 }
 
+/** Inject OSC 8 only across a bounded hit span (pill), not the whole row. */
+export function injectHitSpan(
+  rows: unknown[] | undefined,
+  y: number,
+  x: number | undefined,
+): (() => void) | undefined {
+  if (!Array.isArray(rows) || rows.length === 0) return undefined;
+  if (typeof x !== "number" || !Number.isFinite(x)) return undefined;
+  const idx = Math.max(0, Math.min(rows.length - 1, y));
+  const row = rows[idx];
+  if (typeof row !== "string") return undefined;
+  const span = parseHitSpan(row);
+  if (!span || !isHitAt(span, x)) return undefined;
+  const saved = row;
+  const core = row.replace(/\x1b\[0m\x1b\]8;;(?:\x07|\x1b\\)$/, "");
+  const before = sliceByColumn(core, 0, span.startCol, true);
+  const pill = sliceByColumn(core, span.startCol, span.width, true);
+  const after = sliceByColumn(core, span.startCol + span.width, 10000, true);
+  // Temporary press buffer is never painted. Strip OSC 8 / ANSI inside the pill
+  // so a SEGMENT_RESET close from compositeTuiLine cannot cancel the new link.
+  rows[idx] = before + hyperlink(stripTerminalSequences(pill), foldUrl(span.id)) + after;
+  return () => {
+    rows[idx] = saved;
+  };
+}
+
+/**
+ * Temporarily inject the fold hyperlink for the row at `y` into a frame-buffer
+ * row array (pi's previousScreen). Returns a restore function, or undefined
+ * when the row is not a registered fold row.
+ */
 export function injectFoldRow(
   rows: unknown[] | undefined,
   y: number,
@@ -239,6 +273,7 @@ export function installClickFoldPatch(): () => void {
   altProto.handleSelectionMouseEvent = function (this: OpenUrlHost, event: unknown) {
     const ev = event as {
       release?: boolean;
+      x?: number;
       y?: number;
       button?: number;
     } | undefined;
@@ -246,7 +281,7 @@ export function installClickFoldPatch(): () => void {
     const motion = !!(ev && (ev.button ?? 0) & 32);
     const dragging = !!(this as { selectionPressActive?: boolean }).selectionPressActive;
     if (!dragging && ev && typeof ev.y === "number" && (ev.release || motion)) {
-      if (handleFoldHover(rows, ev.y)) {
+      if (handleFoldHover(rows, ev.y, ev.x)) {
         try {
           this.requestRender?.();
         } catch {
@@ -261,7 +296,7 @@ export function installClickFoldPatch(): () => void {
     // underlines on Windows Terminal / wetty).
     let restoreRow: (() => void) | undefined;
     if (ev && !ev.release && !motion && typeof ev.y === "number") {
-      restoreRow = injectFoldRow(rows, ev.y);
+      restoreRow = injectHitSpan(rows, ev.y, ev.x) ?? injectFoldRow(rows, ev.y);
     }
     try {
       return withFoldOpenUrl(this, () => originalMouse.call(this, event));

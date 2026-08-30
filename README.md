@@ -40,6 +40,7 @@ Grok-flavored TUI for [pi](https://github.com/earendil-works/pi-coding-agent) �
 - Normal terminal scrolling takes over after the transcript exceeds the viewport.
 - If previously overflowing content shrinks (for example, after collapsing output), enable pi's `terminal.clearOnShrink` setting or set `PI_CLEAR_ON_SHRINK=1` to re-anchor the inline viewport. This can flicker and may clear terminal scrollback.
 - Set `PI_GROK_TUI_DOCK_EDITOR=0` to restore pi's native inline editor layout.
+- In **fullscreen**, scrolling the transcript away from the bottom shows a centered **`Jump to bottom (click) ↓`** pill on the last visible transcript row. Click the pill (not the surrounding text) to jump back; it hides once you are following the bottom again. Regular TUI is unchanged.
 
 Only changes TUI rendering. It does not modify LLM context, provider payloads, session messages, or stored conversation data.
 
@@ -79,6 +80,7 @@ After installing, restart pi or run `/reload`.
 | Click expanded tool output (fullscreen) | Fold that tool back to its title |
 | Click write block (fullscreen) | Toggle native 10-line preview ↔ full |
 | Hover a foldable block (fullscreen) | Highlight the whole block |
+| Click `Jump to bottom (click) ↓` (fullscreen) | Jump the transcript back to the bottom |
 | `⌥T` / `Alt+T` / `Ctrl+Shift+H` | Expand/collapse all thinking |
 | `Ctrl+O` | Cycle tool views (compact → preview → full) |
 

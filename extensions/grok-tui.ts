@@ -13,6 +13,7 @@ import { installEditorDockPatch } from "./editor-dock.js";
 import { installParentStamp } from "./parent-stamp.js";
 import { installClickFoldPatch, resetFoldHandlers } from "./click-fold.js";
 import { clearFoldRegistry } from "./fold-body.js";
+import { installJumpBottomPatch } from "./jump-bottom.js";
 import { installSkillFlatPatch } from "./skill-flat.js";
 import { getState, resetClickFoldSession } from "./state.js";
 import { applyGlobalThinkingToggle } from "./thinking-click.js";
@@ -33,6 +34,15 @@ async function installPatch(): Promise<() => void> {
   } catch (error) {
     console.warn(
       "pi-grok-tui: click-fold patch failed:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+  let cleanupJump: (() => void) | undefined;
+  try {
+    cleanupJump = installJumpBottomPatch();
+  } catch (error) {
+    console.warn(
+      "pi-grok-tui: jump-bottom patch failed:",
       error instanceof Error ? error.message : error,
     );
   }
@@ -94,6 +104,7 @@ async function installPatch(): Promise<() => void> {
     cleanupUser?.();
     cleanupEditorDock();
     cleanupStamp();
+    cleanupJump?.();
     cleanupClick?.();
   };
 }
