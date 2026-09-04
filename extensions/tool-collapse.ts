@@ -18,9 +18,16 @@ import {
   INTERNAL_MODULES,
 } from "./internal-import.js";
 import { getPreviousSibling, getSiblings, shouldGapAfter } from "./parent-stamp.js";
-import { markBodyFold, markBodyFoldDeep, unmarkBodyFold } from "./fold-body.js";
+import {
+  markBodyFold,
+  markBodyFoldDeep,
+  unmarkBodyFold,
+  unwrapMouseRegion,
+  wrapFoldBodyComponent,
+} from "./fold-body.js";
 import { getToolViewMode, isGroupExpanded } from "./state.js";
 import {
+  chromePadForRenderShell,
   clickableChromeChild,
   collapsibleRun,
   effectiveToolMode,
@@ -66,6 +73,8 @@ interface ToolExecutionProto {
     addChild(c: unknown): void;
     children?: unknown[];
   };
+  callRendererComponent?: unknown;
+  resultRendererComponent?: unknown;
   imageComponents: unknown[];
   imageSpacers: unknown[];
   children?: unknown[];
@@ -245,6 +254,17 @@ function prependGroupHeader(
   }
 }
 
+function wrapExpandedBody(node: unknown, id: string, pad: number): unknown {
+  const inner = unwrapMouseRegion(node);
+  if (!inner || typeof inner !== "object") return node;
+  markBodyFoldDeep(inner, id, [TITLE_MARK]);
+  return wrapFoldBodyComponent(
+    inner as { render(width: number): string[]; invalidate?(): void },
+    id,
+    pad,
+  );
+}
+
 function applyHorizontalPad(
   renderContainer: { paddingX?: number; paddingY?: number },
 ): void {
@@ -267,6 +287,10 @@ function chromeChild(
     pad?: number;
   },
 ) {
+  const shell =
+    self.hasRendererDefinition() && self.getRenderShell() === "self"
+      ? "self"
+      : "default";
   return clickableChromeChild(theme, {
     target: opts.groupHeader ? (opts.header ?? self) : self,
     toolName: self.toolName,
@@ -274,7 +298,7 @@ function chromeChild(
     label: opts.label,
     failedSuffix: opts.failedSuffix,
     groupHeader: opts.groupHeader,
-    pad: opts.pad,
+    pad: chromePadForRenderShell(shell, opts.pad),
   });
 }
 
@@ -358,16 +382,26 @@ function restyleExpanded(
     stripBgDeep(rc);
     applyHorizontalPad(rc as { paddingX?: number; paddingY?: number });
 
+    const kids = (rc as { children?: unknown[] }).children;
+    const foldPad = shell === "self" ? RESPONSE_LEFT_PAD : 0;
+
     if (preserveNativeBody) {
       // Do not inject chrome title over native "edit path" / do not dimBody —
       // that would strip ANSI diff/syntax colors.
+      stripBgDeep(self.callRendererComponent);
+      stripBgDeep(self.resultRendererComponent);
       const foldId = nativePreviewFoldId(self, self.toolName);
-      if (foldId) markBodyFoldDeep(rc, foldId, []);
+      if (foldId && Array.isArray(kids)) {
+        for (let i = 0; i < kids.length; i++) {
+          kids[i] = wrapExpandedBody(kids[i], foldId, 0);
+        }
+      } else if (foldId) {
+        markBodyFoldDeep(rc, foldId, []);
+      }
       self.hideComponent = false;
       return;
     }
 
-    const kids = (rc as { children?: unknown[] }).children;
     if (Array.isArray(kids)) {
       // Drop previous title mark if re-rendering
       while (
@@ -384,9 +418,9 @@ function restyleExpanded(
       const bodyId = idForTarget(self);
       for (let i = 1; i < kids.length; i++) {
         dimBodyTexts(kids[i], (t) => bodyFg(t), [TITLE_MARK]);
-        // Body rows share the title's fold link: an unmoved click inside the
-        // expanded body folds this tool (fullscreen only; idempotent).
-        markBodyFoldDeep(kids[i], bodyId, [TITLE_MARK]);
+        // Unwrap pi 0.85 MouseRegion so native click-to-expand cannot steal
+        // grok's body-fold press, then wrap for indent + fold markers.
+        kids[i] = wrapExpandedBody(kids[i], bodyId, foldPad);
       }
     }
   } else {

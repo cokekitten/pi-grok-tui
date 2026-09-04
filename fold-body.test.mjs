@@ -1,16 +1,19 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { Box, Text } from "@earendil-works/pi-tui";
+import { Box, MouseRegion, Text, visibleWidth } from "@earendil-works/pi-tui";
 import {
   foldMarker,
   parseFoldMarker,
   withFoldMarker,
+  wrapFoldBodyComponent,
   markBodyFold,
   unmarkBodyFold,
   markBodyFoldDeep,
   installFoldBodyTextPatch,
   clearFoldRegistry,
+  HOVER_BG,
 } from "./extensions/fold-body.ts";
+import { RESPONSE_LEFT_PAD } from "./extensions/chrome.ts";
 import { getState, resetClickFoldSession } from "./extensions/state.ts";
 
 const SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
@@ -56,12 +59,12 @@ describe("fold markers", () => {
     assert.equal(withFoldMarker("  some body", "f1"), "  some body");
   });
 
-  it("skips blank rows", () => {
+  it("marks blank rows so hover can paint a solid rectangle", () => {
     const state = getState();
     state.tuiMode = "fullscreen";
     state.clickFoldReady = true;
-    assert.equal(withFoldMarker("", "f1"), "");
-    assert.equal(withFoldMarker("   ", "f1"), "   ");
+    assert.equal(parseFoldMarker(withFoldMarker("", "f1")), "f1");
+    assert.equal(parseFoldMarker(withFoldMarker("   ", "f1")), "f1");
   });
 
   it("is idempotent for the same id", () => {
@@ -103,6 +106,22 @@ describe("markBodyFoldDeep", () => {
     unmarkBodyFold(leaf);
   });
 
+  it("walks pi 0.85 MouseRegion.child to mark nested Text", () => {
+    const cleanup = installFoldBodyTextPatch();
+    try {
+      const state = getState();
+      state.tuiMode = "fullscreen";
+      state.clickFoldReady = true;
+      const leaf = new Text("mcp body", 0, 0);
+      const region = new MouseRegion(leaf, () => undefined);
+      markBodyFoldDeep({ children: [region] }, "mcp-1", []);
+      const lines = region.render(20);
+      assert.equal(parseFoldMarker(lines[0] ?? ""), "mcp-1");
+    } finally {
+      cleanup();
+    }
+  });
+
   it("marks a write-style Text subclass inside a Box", () => {
     const cleanup = installFoldBodyTextPatch();
     try {
@@ -111,7 +130,7 @@ describe("markBodyFoldDeep", () => {
       state.clickFoldReady = true;
       class WriteLike extends Text {
         constructor() {
-          super("write foo.ts\nline1\nline2", 0, 0);
+          super("write foo.ts\nline1\n\nline2", 0, 0);
         }
       }
       const box = new Box(0, 0);
@@ -120,8 +139,11 @@ describe("markBodyFoldDeep", () => {
       markBodyFoldDeep(box, "write-1", []);
       const lines = box.render(40);
       assert.ok(lines.length >= 3);
+      assert.ok(
+        lines.some((line) => line.replace(/\x1b\]9999;[^\x07]*\x07/g, "").trim() === ""),
+        "write preview should keep an interior blank line",
+      );
       for (const line of lines) {
-        if (line.trim() === "") continue;
         assert.equal(parseFoldMarker(line), "write-1");
       }
     } finally {
@@ -190,5 +212,35 @@ describe("installFoldBodyTextPatch", () => {
     cleanup = undefined;
     const lines = marked.render(30);
     assert.equal(parseFoldMarker(lines[0] ?? ""), undefined);
+  });
+});
+
+describe("wrapFoldBodyComponent", () => {
+  it("indents custom-render rows and paints fold markers including blanks", () => {
+    const state = getState();
+    state.tuiMode = "fullscreen";
+    state.clickFoldReady = true;
+    state.hoveredFoldId = "mcp-1";
+    let invalidated = 0;
+    const inner = {
+      render() {
+        return ["first", "", "second"];
+      },
+      invalidate() {
+        invalidated += 1;
+      },
+    };
+    const wrapped = wrapFoldBodyComponent(inner, "mcp-1", RESPONSE_LEFT_PAD);
+    const lines = wrapped.render(20);
+    assert.equal(lines.length, 3);
+    const pad = " ".repeat(RESPONSE_LEFT_PAD);
+    for (const line of lines) {
+      assert.ok(line.startsWith(pad));
+      assert.equal(parseFoldMarker(line), "mcp-1");
+      assert.ok(line.includes(`48;2;${HOVER_BG.r};${HOVER_BG.g};${HOVER_BG.b}`));
+      assert.equal(visibleWidth(line), 20);
+    }
+    wrapped.invalidate();
+    assert.equal(invalidated, 1);
   });
 });

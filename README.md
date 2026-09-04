@@ -17,16 +17,21 @@ Grok-flavored TUI for [pi](https://github.com/earendil-works/pi-coding-agent) �
 
 - Collapsible tools (**not** `edit`/`write`): **always title-only** while collapsed — including while running (no process/output body).
 - Status diamonds: muted while running, green on success, red on failure.
-- Consecutive collapsible tools **merge** into a Grok-style header, e.g. `◇ Read 2 files` or `◇ Ran 1 command · 1 failed`.
+- Consecutive collapsible tools **merge** into a Grok-style header, e.g. `◇ Read 2 files` or `◇ Ran 1 command · 1 failed`. Compact MCP (`renderShell: "self"`) titles get the same left indent as `Execute` / `Thought`.
 - **`write` stays native preview** by default (first 10 lines, syntax highlighting; background blocks removed). In **fullscreen**, click **anywhere in the write block** to expand to full content; click again to return to the 10-line preview. Compact global mode maps write to that preview — never a grok title-only row.
 - **`edit` stays fully expanded** (full diff, native highlighting; background blocks removed) and is **not** click-to-fold.
-- In **fullscreen**, click chrome to fold that row (Read → preview; other tools → full). Click a group header to split/merge the group; click a member to open only that member. When a tool is expanded, click **anywhere in its output** to fold it back to the title row. Hovering a chrome or body row highlights that **whole block** (group header vs member stay separate).
+- In **fullscreen**, click chrome to fold that row (Read → preview; other tools → full). Click a group header to split/merge the group; click a member to open only that member. When a tool is expanded, click **anywhere in its output** to fold it back to the title row. Hovering a chrome or body row highlights that **whole block** as one rectangle, including interior blank lines (group header vs member stay separate).
 - **`Ctrl+O` cycles three global views** (and clears per-row tool clicks):
   1. **compact** — one-line chrome (default)
   2. **preview** — pi’s original truncated tool output
   3. **full** — fully expanded tool output  
   then back to compact.
 - Regular TUI keeps the **`(Ctrl+O)`** hint on chrome.
+
+### Compaction
+
+- Context compaction is restyled to grok chrome: **`◇ Compacted from N tokens`**, no native `[compaction]` label or purple block.
+- In **fullscreen**, click the row to expand/collapse the summary. **`Ctrl+O`** still cycles the global tool view (compact hides the summary body).
 
 ### User messages
 
@@ -40,7 +45,7 @@ Grok-flavored TUI for [pi](https://github.com/earendil-works/pi-coding-agent) �
 - Normal terminal scrolling takes over after the transcript exceeds the viewport.
 - If previously overflowing content shrinks (for example, after collapsing output), enable pi's `terminal.clearOnShrink` setting or set `PI_CLEAR_ON_SHRINK=1` to re-anchor the inline viewport. This can flicker and may clear terminal scrollback.
 - Set `PI_GROK_TUI_DOCK_EDITOR=0` to restore pi's native inline editor layout.
-- In **fullscreen**, scrolling the transcript away from the bottom shows a centered **`Jump to bottom (click) ↓`** pill on the last visible transcript row. Click the pill (not the surrounding text) to jump back; it hides once you are following the bottom again. Regular TUI is unchanged.
+- In **fullscreen**, pi 0.85+ already shows a native **Jump to latest message** label when the transcript is scrolled up. grok-tui no longer paints its own jump-bottom pill.
 
 Only changes TUI rendering. It does not modify LLM context, provider payloads, session messages, or stored conversation data.
 
@@ -79,8 +84,8 @@ After installing, restart pi or run `/reload`.
 | Click tool / group chrome (fullscreen) | Fold that row or split/merge the group |
 | Click expanded tool output (fullscreen) | Fold that tool back to its title |
 | Click write block (fullscreen) | Toggle native 10-line preview ↔ full |
-| Hover a foldable block (fullscreen) | Highlight the whole block |
-| Click `Jump to bottom (click) ↓` (fullscreen) | Jump the transcript back to the bottom |
+| Hover a foldable block (fullscreen) | Highlight the whole block, including blank lines |
+| Click compaction chrome (fullscreen) | Expand/collapse that compaction summary |
 | `⌥T` / `Alt+T` / `Ctrl+Shift+H` | Expand/collapse all thinking |
 | `Ctrl+O` | Cycle tool views (compact → preview → full) |
 

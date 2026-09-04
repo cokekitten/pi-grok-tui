@@ -55,6 +55,9 @@ export function stripBgDeep(node: unknown, depth = 0): void {
     contentBox?: unknown;
     contentText?: unknown;
     selfRenderContainer?: unknown;
+    child?: unknown;
+    callRendererComponent?: unknown;
+    resultRendererComponent?: unknown;
     cache?: unknown;
     cachedText?: unknown;
     cachedWidth?: unknown;
@@ -81,6 +84,9 @@ export function stripBgDeep(node: unknown, depth = 0): void {
   if (n.contentBox) stripBgDeep(n.contentBox, depth + 1);
   if (n.contentText) stripBgDeep(n.contentText, depth + 1);
   if (n.selfRenderContainer) stripBgDeep(n.selfRenderContainer, depth + 1);
+  if (n.child) stripBgDeep(n.child, depth + 1);
+  if (n.callRendererComponent) stripBgDeep(n.callRendererComponent, depth + 1);
+  if (n.resultRendererComponent) stripBgDeep(n.resultRendererComponent, depth + 1);
 
   if (Array.isArray(n.children)) {
     for (const c of n.children) {
@@ -118,6 +124,7 @@ export function dimBodyTexts(
     cachedText?: unknown;
     cachedWidth?: unknown;
     cachedLines?: unknown;
+    child?: unknown;
   };
 
   // Don't recurse into nested tools
@@ -144,6 +151,9 @@ export function dimBodyTexts(
     }
   }
 
+  if (n.child && typeof n.child === "object") {
+    dimBodyTexts(n.child, dimFn, skipMarks, depth + 1);
+  }
   if (Array.isArray(n.children)) {
     for (const c of n.children) dimBodyTexts(c, dimFn, skipMarks, depth + 1);
   }

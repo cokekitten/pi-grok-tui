@@ -8,12 +8,12 @@
  * Does not alter session data or model I/O.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { installCompactionStylePatch } from "./compaction-style.js";
 import { installCustomMessageCollapsePatch } from "./custom-message-collapse.js";
 import { installEditorDockPatch } from "./editor-dock.js";
 import { installParentStamp } from "./parent-stamp.js";
 import { installClickFoldPatch, resetFoldHandlers } from "./click-fold.js";
 import { clearFoldRegistry } from "./fold-body.js";
-import { installJumpBottomPatch } from "./jump-bottom.js";
 import { installSkillFlatPatch } from "./skill-flat.js";
 import { getState, resetClickFoldSession } from "./state.js";
 import { applyGlobalThinkingToggle } from "./thinking-click.js";
@@ -37,21 +37,13 @@ async function installPatch(): Promise<() => void> {
       error instanceof Error ? error.message : error,
     );
   }
-  let cleanupJump: (() => void) | undefined;
-  try {
-    cleanupJump = installJumpBottomPatch();
-  } catch (error) {
-    console.warn(
-      "pi-grok-tui: jump-bottom patch failed:",
-      error instanceof Error ? error.message : error,
-    );
-  }
   // Parent stamp first so subsequent UI builds record siblings for spacing.
   const cleanupStamp = installParentStamp();
   const cleanupThinking = await installThinkingPatch();
   const cleanupEditorDock = installEditorDockPatch();
   let cleanupTools: (() => void) | undefined;
   let cleanupCustom: (() => void) | undefined;
+  let cleanupCompaction: (() => void) | undefined;
   let cleanupCycle: (() => void) | undefined;
   let cleanupSkill: (() => void) | undefined;
   let cleanupUser: (() => void) | undefined;
@@ -68,6 +60,14 @@ async function installPatch(): Promise<() => void> {
   } catch (error) {
     console.warn(
       "pi-grok-tui: custom message collapse patch failed:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+  try {
+    cleanupCompaction = await installCompactionStylePatch();
+  } catch (error) {
+    console.warn(
+      "pi-grok-tui: compaction style patch failed:",
       error instanceof Error ? error.message : error,
     );
   }
@@ -99,12 +99,12 @@ async function installPatch(): Promise<() => void> {
     cleanupThinking();
     cleanupTools?.();
     cleanupCustom?.();
+    cleanupCompaction?.();
     cleanupSkill?.();
     cleanupCycle?.();
     cleanupUser?.();
     cleanupEditorDock();
     cleanupStamp();
-    cleanupJump?.();
     cleanupClick?.();
   };
 }

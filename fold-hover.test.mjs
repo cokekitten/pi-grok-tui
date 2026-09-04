@@ -1,5 +1,6 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import {
   foldMarker,
   parseFoldMarker,
@@ -45,6 +46,14 @@ describe("withFoldMarker hover paint", () => {
       false,
     );
   });
+
+  it("washes a blank row to full width when hovered", () => {
+    getState().hoveredFoldId = "f1";
+    const painted = withFoldMarker("", "f1", 20);
+    assert.equal(parseFoldMarker(painted), "f1");
+    assert.ok(painted.includes(`48;2;${HOVER_BG.r};${HOVER_BG.g};${HOVER_BG.b}`));
+    assert.equal(visibleWidth(painted), 20);
+  });
 });
 
 describe("handleFoldHover", () => {
@@ -65,6 +74,12 @@ describe("handleFoldHover", () => {
     getState().hoveredFoldId = "think-11";
     assert.equal(handleFoldHover(["plain row"], 0), true);
     assert.equal(getState().hoveredFoldId, undefined);
+  });
+
+  it("keeps hover when the pointer is on a marked blank row", () => {
+    const blank = withFoldMarker("", "write-1", 20);
+    assert.equal(handleFoldHover([blank], 0), true);
+    assert.equal(getState().hoveredFoldId, "write-1");
   });
 
   it("does not steal injectFoldRow press lookup", () => {

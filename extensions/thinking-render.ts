@@ -141,10 +141,12 @@ export class ThinkingScrollComponent {
       dimBody: true,
     });
     const body = rendered.map((l) => {
-      if (l.trim() === "") return "";
-      // Body rows fold this block on press (zero-width OSC 9999 marker).
+      const painted =
+        l.trim() === "" ? "" : `  ${bodyFg(stripAnsiLocal(l))}`;
+      // Body rows fold this block on press (zero-width OSC 9999 marker),
+      // including interior blank lines so hover is one rectangle.
       return withFoldMarker(
-        `  ${bodyFg(stripAnsiLocal(l))}`,
+        painted,
         thinkingFoldId(this.messageTimestamp),
         width,
       );

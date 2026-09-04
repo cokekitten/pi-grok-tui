@@ -45,17 +45,69 @@ function paintHoverBg(line: string, width?: number): string {
 }
 
 /**
- * Prefix a final render row with the fold marker (gated; empty rows skipped).
- * When `hoveredFoldId` matches, wash the row with HOVER_BG (Grok-style block hover).
+ * Prefix a final render row with the fold marker (gated; blank rows included
+ * so hover paints one rectangle). When `hoveredFoldId` matches, wash the row
+ * with HOVER_BG (Grok-style block hover).
  */
 export function withFoldMarker(line: string, id: string, width?: number): string {
   const state = getState();
   if (state.tuiMode !== "fullscreen" || !state.clickFoldReady) return line;
-  if (line.trim() === "") return line;
   const body =
     state.hoveredFoldId === id ? paintHoverBg(line, width) : line;
   if (parseFoldMarker(body) === id) return body;
   return foldMarker(id) + body;
+}
+
+type FoldBodyComponent = {
+  render(width: number): string[];
+  invalidate?(): void;
+  handleMouse?(event: unknown): unknown;
+};
+
+/** pi 0.85 wraps tool output in MouseRegion (`child` + `onMouse`). */
+export function unwrapMouseRegion(component: unknown): unknown {
+  if (!component || typeof component !== "object") return component;
+  const n = component as {
+    child?: unknown;
+    onMouse?: unknown;
+    render?: unknown;
+  };
+  if (
+    n.child &&
+    typeof n.onMouse === "function" &&
+    typeof n.render === "function"
+  ) {
+    return n.child;
+  }
+  return component;
+}
+
+/**
+ * Wrap a self-shell / custom renderer so every painted row (including blanks)
+ * is indented and carries the fold marker. Spaces go *before* the marker so
+ * hover starts on the same column as self-shell chrome.
+ */
+export function wrapFoldBodyComponent(
+  component: FoldBodyComponent,
+  id: string,
+  pad = 0,
+): FoldBodyComponent {
+  const actualPad = Math.max(0, pad);
+  const spaces = actualPad > 0 ? " ".repeat(actualPad) : "";
+  return {
+    render(width: number) {
+      const inner = Math.max(1, width - actualPad);
+      return component.render(inner).map(
+        (line) => spaces + withFoldMarker(line, id, inner),
+      );
+    },
+    invalidate() {
+      component.invalidate?.();
+    },
+    handleMouse(event: unknown) {
+      return component.handleMouse?.(event);
+    },
+  };
 }
 
 /** Session reset: markers live in painted rows, so there is nothing to drop. */
@@ -82,6 +134,7 @@ export function markBodyFoldDeep(
     text?: string;
     setText?: unknown;
     children?: unknown[];
+    child?: unknown;
     toolName?: string;
     updateDisplay?: unknown;
   };
@@ -94,6 +147,10 @@ export function markBodyFoldDeep(
   }
   if (typeof n.setText === "function" && typeof n.text === "string") {
     registerTextInstance(n, id);
+  }
+  // pi 0.85 wraps tool output in MouseRegion ({ child, onMouse }).
+  if (n.child && typeof n.child === "object") {
+    markBodyFoldDeep(n.child, id, skipMarks, depth + 1);
   }
   if (Array.isArray(n.children)) {
     for (const c of n.children) {

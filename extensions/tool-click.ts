@@ -1,7 +1,7 @@
 /**
  * Per-tool / group click fold helpers.
  */
-import type { ChromeKind, ChromeTheme } from "./chrome.ts";
+import { RESPONSE_LEFT_PAD, type ChromeKind, type ChromeTheme } from "./chrome.ts";
 import { groupRunRange, nextToolFoldMode, type GroupSibling } from "./click-fold-core.ts";
 import {
   groupFoldId,
@@ -18,6 +18,15 @@ import {
   type ToolViewMode,
 } from "./state.ts";
 import { isCollapsibleTool } from "./tool-titles.ts";
+
+/** Self-shell tools (MCP compact) have no Box padding — indent the chrome child. */
+export function chromePadForRenderShell(
+  shell: "self" | "default",
+  explicitPad?: number,
+): number {
+  if (typeof explicitPad === "number") return explicitPad;
+  return shell === "self" ? RESPONSE_LEFT_PAD : 0;
+}
 
 export function toolChromeKind(status: {
   running: boolean;

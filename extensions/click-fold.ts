@@ -3,8 +3,6 @@
  */
 import {
   hyperlink,
-  sliceByColumn,
-  stripTerminalSequences,
   truncateToWidth,
   TuiAltScreen,
   TuiMainScreen,
@@ -21,7 +19,6 @@ import {
   parseFoldId,
 } from "./click-fold-core.ts";
 import { installFoldBodyTextPatch, parseFoldMarker, withFoldMarker } from "./fold-body.ts";
-import { isHitAt, parseHitSpan } from "./jump-bottom-core.ts";
 import { getState } from "./state.ts";
 
 const handlers = new Map<string, () => void>();
@@ -83,7 +80,7 @@ type OpenUrlHost = {
 export function handleFoldHover(
   rows: unknown[] | undefined,
   y: number | undefined,
-  x?: number,
+  _x?: number,
 ): boolean {
   const state = getState();
   if (!state.clickFoldReady || state.tuiMode !== "fullscreen") return false;
@@ -97,40 +94,12 @@ export function handleFoldHover(
     const idx = Math.max(0, Math.min(rows.length - 1, y));
     const row = rows[idx];
     if (typeof row === "string") {
-      const span = parseHitSpan(row);
-      if (span && isHitAt(span, x ?? Number.NaN)) next = span.id;
-      else next = parseFoldMarker(row);
+      next = parseFoldMarker(row);
     }
   }
   if (state.hoveredFoldId === next) return false;
   state.hoveredFoldId = next;
   return true;
-}
-
-/** Inject OSC 8 only across a bounded hit span (pill), not the whole row. */
-export function injectHitSpan(
-  rows: unknown[] | undefined,
-  y: number,
-  x: number | undefined,
-): (() => void) | undefined {
-  if (!Array.isArray(rows) || rows.length === 0) return undefined;
-  if (typeof x !== "number" || !Number.isFinite(x)) return undefined;
-  const idx = Math.max(0, Math.min(rows.length - 1, y));
-  const row = rows[idx];
-  if (typeof row !== "string") return undefined;
-  const span = parseHitSpan(row);
-  if (!span || !isHitAt(span, x)) return undefined;
-  const saved = row;
-  const core = row.replace(/\x1b\[0m\x1b\]8;;(?:\x07|\x1b\\)$/, "");
-  const before = sliceByColumn(core, 0, span.startCol, true);
-  const pill = sliceByColumn(core, span.startCol, span.width, true);
-  const after = sliceByColumn(core, span.startCol + span.width, 10000, true);
-  // Temporary press buffer is never painted. Strip OSC 8 / ANSI inside the pill
-  // so a SEGMENT_RESET close from compositeTuiLine cannot cancel the new link.
-  rows[idx] = before + hyperlink(stripTerminalSequences(pill), foldUrl(span.id)) + after;
-  return () => {
-    rows[idx] = saved;
-  };
 }
 
 /**
@@ -296,7 +265,7 @@ export function installClickFoldPatch(): () => void {
     // underlines on Windows Terminal / wetty).
     let restoreRow: (() => void) | undefined;
     if (ev && !ev.release && !motion && typeof ev.y === "number") {
-      restoreRow = injectHitSpan(rows, ev.y, ev.x) ?? injectFoldRow(rows, ev.y);
+      restoreRow = injectFoldRow(rows, ev.y);
     }
     try {
       return withFoldOpenUrl(this, () => originalMouse.call(this, event));

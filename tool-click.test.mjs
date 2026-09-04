@@ -8,7 +8,9 @@ import {
   collapsibleRun,
   toolChromeKind,
   nativePreviewFoldId,
+  chromePadForRenderShell,
 } from "./extensions/tool-click.ts";
+import { RESPONSE_LEFT_PAD } from "./extensions/chrome.ts";
 import {
   getState,
   resetClickFoldSession,
@@ -26,6 +28,18 @@ beforeEach(() => {
   resetClickFoldSession();
   resetFoldHandlers();
   getState().toolViewMode = "chrome";
+});
+
+describe("chromePadForRenderShell", () => {
+  it("indents self-shell chrome and leaves default Box padding to the container", () => {
+    assert.equal(chromePadForRenderShell("self"), RESPONSE_LEFT_PAD);
+    assert.equal(chromePadForRenderShell("default"), 0);
+  });
+
+  it("lets an explicit pad win over the shell default", () => {
+    assert.equal(chromePadForRenderShell("self", 0), 0);
+    assert.equal(chromePadForRenderShell("default", 4), 4);
+  });
 });
 
 describe("toolChromeKind", () => {
