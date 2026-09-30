@@ -21,23 +21,44 @@ import {
 import { installFoldBodyTextPatch, parseFoldMarker, withFoldMarker } from "./fold-body.ts";
 import { getState } from "./state.ts";
 
-const handlers = new Map<string, () => void>();
-const targetIds = new WeakMap<object, string>();
-let nextId = 1;
+const HANDLERS_KEY = Symbol.for("pi-grok-tui.foldRegistry");
+
+type FoldRegistry = {
+  handlers: Map<string, () => void>;
+  targetIds: WeakMap<object, string>;
+  nextId: number;
+};
+
+/**
+ * Module state must live on globalThis: pi's jiti (moduleCache: false) evaluates
+ * this file once per import specifier ("./click-fold.js" vs "./click-fold.ts"),
+ * so the installer/dispatcher chain and the render/register chain can hold two
+ * separate module instances. A plain Map here made every click dispatch miss
+ * its handler (Windows pi 0.99.1). Same pattern as state.ts's Symbol.for key.
+ */
+function foldRegistry(): FoldRegistry {
+  const g = globalThis as typeof globalThis & { [HANDLERS_KEY]?: FoldRegistry };
+  let r = g[HANDLERS_KEY];
+  if (!r || !(r.handlers instanceof Map) || !(r.targetIds instanceof WeakMap)) {
+    r = { handlers: new Map(), targetIds: new WeakMap(), nextId: 1 };
+    g[HANDLERS_KEY] = r;
+  }
+  return r;
+}
 
 export function resetFoldHandlers(): void {
-  handlers.clear();
+  foldRegistry().handlers.clear();
 }
 
 export function registerFoldHandler(id: string, handler: () => void): void {
-  handlers.set(id, handler);
+  foldRegistry().handlers.set(id, handler);
 }
 
 export function dispatchGrokFoldUrl(url: string): boolean {
   if (!isGrokFoldScheme(url)) return false;
   const id = parseFoldId(url);
   if (id) {
-    const handler = handlers.get(id);
+    const handler = foldRegistry().handlers.get(id);
     if (handler) {
       try {
         handler();
@@ -50,16 +71,18 @@ export function dispatchGrokFoldUrl(url: string): boolean {
 }
 
 export function newFoldId(): string {
-  const id = `f${nextId}`;
-  nextId += 1;
+  const r = foldRegistry();
+  const id = `f${r.nextId}`;
+  r.nextId += 1;
   return id;
 }
 
 export function idForTarget(target: object): string {
-  const existing = targetIds.get(target);
+  const r = foldRegistry();
+  const existing = r.targetIds.get(target);
   if (existing) return existing;
   const id = newFoldId();
-  targetIds.set(target, id);
+  r.targetIds.set(target, id);
   return id;
 }
 

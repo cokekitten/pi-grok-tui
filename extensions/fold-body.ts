@@ -159,7 +159,23 @@ export function markBodyFoldDeep(
   }
 }
 
-const textInstances = new WeakMap<object, string>();
+/**
+ * Text fold marks must also survive the .js/.ts specifier module split (see
+ * click-fold.ts foldRegistry): markBodyFold writes come from the tool-collapse
+ * render chain while the Text.prototype patch reads from the installer chain.
+ */
+const TEXT_INSTANCES_KEY = Symbol.for("pi-grok-tui.foldTextInstances");
+const textInstances: WeakMap<object, string> = (() => {
+  const g = globalThis as typeof globalThis & {
+    [TEXT_INSTANCES_KEY]?: WeakMap<object, string>;
+  };
+  let m = g[TEXT_INSTANCES_KEY];
+  if (!(m instanceof WeakMap)) {
+    m = new WeakMap<object, string>();
+    g[TEXT_INSTANCES_KEY] = m;
+  }
+  return m;
+})();
 
 function registerTextInstance(node: object, id: string): void {
   textInstances.set(node, id);
