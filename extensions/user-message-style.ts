@@ -6,12 +6,13 @@
  * Display-only; does not change session data.
  */
 import { Box, Markdown } from "@earendil-works/pi-tui";
-import { ansiBgHex, ansiFgHex } from "./chrome.js";
+import { markUserMessageRows } from "./prompt-jump-core.ts";
+import { ansiBgHex, ansiFgHex } from "./chrome.ts";
 import {
   importInternal,
   PI_CODING_AGENT,
   INTERNAL_MODULES,
-} from "./internal-import.js";
+} from "./internal-import.ts";
 
 /** Near-black user bubble (requested). */
 export const USER_MESSAGE_BG = "#0f1217";
@@ -27,6 +28,7 @@ interface UserMessageProto {
   clear(): void;
   addChild(c: unknown): void;
   rebuild(): void;
+  render(width: number): string[];
 }
 
 /** Body that renders markdown with a colored arrow on the first line. */
@@ -98,6 +100,12 @@ export async function installUserMessageStylePatch(): Promise<() => void> {
   }
 
   const originalRebuild = prototype.rebuild;
+  const originalRender = prototype.render;
+  // Mark the actual component boundary, not the ❯ glyph or generic OSC 133.
+  // This also works for message components created before /reload.
+  prototype.render = function (this: UserMessageProto, width: number) {
+    return markUserMessageRows(originalRender.call(this, width));
+  };
 
   prototype.rebuild = function (this: UserMessageProto) {
     try {
@@ -132,5 +140,6 @@ export async function installUserMessageStylePatch(): Promise<() => void> {
 
   return () => {
     prototype.rebuild = originalRebuild;
+    prototype.render = originalRender;
   };
 }

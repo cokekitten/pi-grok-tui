@@ -2,21 +2,16 @@
  * Fullscreen previous-message jump float — one strip at the top of the
  * transcript viewport showing the most recent user message scrolled past.
  *
- * Clicking the strip jumps to that message (first row top-aligned, like pi's
- * `⌥↑ previousPrompt`); the strip then shows the next older user message.
- * Display-only: it repaints one viewport row before overlay compositing, so
- * real dialogs and search still cover it. Fail-soft — any missing seam just
+ * Clicking aligns the user block's top padding with the viewport; the strip
+ * covers that empty row while the message text remains visible below it.
+ * Display-only: one viewport row, hidden while real dialogs/search are open. Fail-soft — any missing seam just
  * means no strip.
  */
-import { TuiAltScreen, visibleWidth } from "@earendil-works/pi-tui";
+import { sliceByColumn, TuiAltScreen, visibleWidth } from "@earendil-works/pi-tui";
 import { ansiBgHex, ansiFgHex } from "./chrome.ts";
 import { registerFoldHandler } from "./click-fold.ts";
-import { HOVER_BG, withFoldMarker } from "./fold-body.ts";
-import {
-  findPromptRows,
-  formatStrip,
-  pickFloatTarget,
-} from "./prompt-jump-core.ts";
+import { HOVER_BG, parseFoldMarker, withFoldMarker } from "./fold-body.ts";
+import { findUserMessageTarget, formatStrip } from "./prompt-jump-core.ts";
 import { getState } from "./state.ts";
 import {
   USER_MESSAGE_ARROW_FG,
@@ -25,7 +20,8 @@ import {
 
 /** Stable fold id — re-registered every paint with a fresh jump closure. */
 const STRIP_ID = "prompt-jump";
-const HOVER_BG_HEX = "#2c2c2c";
+const HOVER_BG_HEX = `#${[HOVER_BG.r, HOVER_BG.g, HOVER_BG.b]
+  .map(n => n.toString(16).padStart(2, "0")).join("")}`;
 
 type RectLike = { x: number; y: number; width: number; height: number };
 
@@ -39,12 +35,20 @@ type LayoutBoxLike = {
 
 type ScrollViewLike = {
   scrollTop?: unknown;
+  isScrollbarVisible?: boolean;
   scrollTo?: (top: number, options?: { disableFollow?: boolean }) => void;
 };
 
+type MouseEvent = { x: number; y: number; button: number; release?: boolean };
+type StripBounds = { row: number; width: number };
 type AltScreenHost = {
   isFollowingOutput?: boolean;
   requestRender?: (force?: boolean) => void;
+  hasOverlay?: () => boolean;
+  previousScreen?: string[];
+  mouseCapture?: unknown;
+  mousePressTarget?: unknown;
+  handleSelectionMouseEvent?: (event: MouseEvent) => unknown;
 };
 
 function findScrollBox(
@@ -75,10 +79,10 @@ function paintPromptJump(
   host: AltScreenHost,
   screen: string[],
   layout: unknown,
-): void {
+): StripBounds | undefined {
   try {
     const state = getState();
-    if (state.tuiMode !== "fullscreen") return;
+    if (state.tuiMode !== "fullscreen" || !state.clickFoldReady || host.hasOverlay?.()) return;
     const frame = layout as
       | { primaryScrollView?: unknown; root?: LayoutBoxLike }
       | undefined;
@@ -96,21 +100,24 @@ function paintPromptJump(
 
     const scrollTop = (scrollView as ScrollViewLike).scrollTop;
     if (typeof scrollTop !== "number") return;
-    const target = pickFloatTarget(findPromptRows(lines), scrollTop);
+    const target = findUserMessageTarget(lines, scrollTop);
     if (target === undefined) return;
 
     const row = Math.max(rect.y, clip.y);
     if (row < 0 || row >= screen.length) return;
     if (row >= clip.y + clip.height) return;
 
-    const width = Math.min(rect.width, clip.width);
+    const scrollbar = (scrollView as ScrollViewLike).isScrollbarVisible ? 1 : 0;
+    const width = Math.min(rect.width - scrollbar, clip.width);
     if (width < 4) return;
-    const text = formatStrip(lines[target] ?? "", width);
+    // /reload can retain user components built with native (arrowless) bodies.
+    const preview = target.preview.startsWith("❯") ? target.preview : `❯ ${target.preview}`;
+    const text = formatStrip(preview, width);
     if (!text) return;
 
     registerFoldHandler(STRIP_ID, () => {
       try {
-        (scrollView as ScrollViewLike).scrollTo?.(target, {
+        (scrollView as ScrollViewLike).scrollTo?.(target.row, {
           disableFollow: true,
         });
         host.requestRender?.();
@@ -119,11 +126,13 @@ function paintPromptJump(
       }
     });
     const hovered = state.hoveredFoldId === STRIP_ID;
-    screen[row] = withFoldMarker(
-      styleStrip(text, width, hovered),
-      STRIP_ID,
-      width,
-    );
+    // Keep the scrollbar cell. compositeTuiLine adds an OSC 8 close BEFORE
+    // the strip, which would immediately cancel click-fold's press-only link.
+    // Put the segment reset AFTER the strip instead, bounding its hit area.
+    const suffix = sliceByColumn(screen[row] ?? "", width, Math.max(0, rect.width - width), true);
+    screen[row] = withFoldMarker(styleStrip(text, width, hovered), STRIP_ID, width)
+      + "\x1b[0m\x1b]8;;\x07" + suffix;
+    return { row, width };
   } catch {
     /* never throw out of render */
   }
@@ -132,7 +141,11 @@ function paintPromptJump(
 export function installPromptJumpPatch(): () => void {
   const proto = TuiAltScreen.prototype as unknown as {
     applySearchHighlights?: (screen: string[], layout: unknown) => string[];
+    handleMouseEvent?: (event: MouseEvent) => unknown;
   };
+  // Both wrappers share this install-local map; no cross-jiti-instance state.
+  const bounds = new WeakMap<AltScreenHost, StripBounds>();
+  const originalMouse = proto.handleMouseEvent;
   const original = proto.applySearchHighlights;
   if (typeof original !== "function") return () => {};
   proto.applySearchHighlights = function (
@@ -141,10 +154,32 @@ export function installPromptJumpPatch(): () => void {
     layout: unknown,
   ): string[] {
     const out = original.call(this, screen, layout) ?? screen;
-    paintPromptJump(this as AltScreenHost, out, layout);
+    const host = this as AltScreenHost;
+    bounds.delete(host);
+    const strip = paintPromptJump(host, out, layout);
+    if (strip) bounds.set(host, strip);
     return out;
   };
+  if (typeof originalMouse === "function") {
+    proto.handleMouseEvent = function (this: AltScreenHost, event: MouseEvent) {
+      const strip = bounds.get(this);
+      const button = event.button & 3;
+      const primaryOrHover = button === 0 || (button === 3 && ((event.button & 32) !== 0 || event.release));
+      // A painted float wins over any MouseRegion/tool body underneath, but
+      // not dialogs, scrollbar cells, or an existing component drag capture.
+      if (strip && primaryOrHover && !this.hasOverlay?.() && !this.mouseCapture && !this.mousePressTarget
+        && event.y === strip.row && event.x >= 0 && event.x < strip.width
+        && parseFoldMarker(this.previousScreen?.[event.y] ?? "") === STRIP_ID
+        && typeof this.handleSelectionMouseEvent === "function") {
+        return this.handleSelectionMouseEvent(event);
+      }
+      return originalMouse.call(this, event);
+    };
+  }
   return () => {
     proto.applySearchHighlights = original;
+    if (typeof originalMouse === "function") proto.handleMouseEvent = originalMouse;
+    registerFoldHandler(STRIP_ID, () => {});
+    if (getState().hoveredFoldId === STRIP_ID) getState().hoveredFoldId = undefined;
   };
 }

@@ -42,8 +42,8 @@ Grok-flavored TUI for [pi](https://github.com/earendil-works/pi-coding-agent) �
 ### Message jump float
 
 - While the fullscreen transcript is scrolled away from the bottom, a one-line strip floats at the top of the viewport showing the most recent user message scrolled past (`❯ …`, truncated with `…`).
-- **Click the strip** to jump to that message — its first row lands at the top of the viewport (same landing as pi's `⌥↑ previousPrompt`). The strip then shows the next older user message.
-- Scrolling back to the bottom hides the strip. Regular TUI is unchanged. Fail-soft: if a pi seam is missing, there is simply no strip.
+- **Click the strip** to jump to that user message. The strip then shows the next older user message; the landed message's first text line stays visible directly below it (the strip covers only its top padding).
+- Only real user messages are targets, not assistant/tool output. Scrolling back to the bottom hides the strip; dialogs take priority. Regular TUI is unchanged. Fail-soft: if a pi seam is missing, there is simply no strip.
 
 ### Editor
 
@@ -106,6 +106,8 @@ Formerly **`pi-thinking-scroll`** (repo renamed to `pi-grok-tui`).
 
 ```bash
 npm test
+# Optional real pi CLI/PTY regression (python3 + pi on PATH; isolated synthetic session):
+npm run test:prompt-jump-pty
 ```
 
 Package entry: `package.json` → `pi.extensions` → `./extensions/grok-tui.ts`.

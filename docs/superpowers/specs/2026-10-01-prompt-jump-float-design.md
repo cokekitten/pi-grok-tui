@@ -1,69 +1,55 @@
 # Design: Fullscreen previous-message jump float
 
-**Date:** 2026-10-01
+**Date:** 2026-10-01; implementation corrected 2026-10-02
 **Repo:** `pi-grok-tui`
-**Status:** Implemented (user waived the spec-review gate)
 
 ## Goal
 
-In pi **fullscreen** TUI, while the transcript is scrolled away from the bottom, float a **single one-line strip** at the top of the transcript viewport showing the most recent user message that has been scrolled past (its first row is above the viewport top). Clicking the strip scrolls so that message's first row is top-aligned in the viewport; the strip then updates to show the next older user message. Regular TUI is unchanged.
+While the fullscreen transcript is scrolled away from the bottom, show **one one-line strip** at the top with the nearest user message above the viewport. Click to jump to that message; the strip then shows the previous user message. The jumped-to message is real transcript content, not a second float.
 
-Display-only. No pi core fork.
+Display-only. No pi core fork, message mutation, or persisted navigation state. Regular TUI is unchanged.
 
-## Decisions (locked)
+## Decisions
 
 | Topic | Decision |
 |-------|----------|
-| Scope | Fullscreen only (`TuiAltScreen`) |
-| Shape | **One strip at a time** (a "deck" of stacked strips is explicitly out of scope; a jumped-to message sitting at the viewport top is real content, not a second strip) |
-| Strip content | Exactly one line: the user message's rendered first row, ANSI-stripped, truncated to the viewport width with `…` (the row already carries the `❯` marker) |
-| Placement | Overlay the **first row of the transcript viewport** (below the header). No layout shift. |
-| Show when | `TuiAltScreen.isFollowingOutput === false` **and** at least one user-message row exists above `scrollTop` |
-| Hide when | Back at the bottom (follow-end), no user message above the viewport top, or the strip cannot be rendered |
-| User-message row | A `scrollContentLines` row matching `^\x1b\]133;A` — same source as pi's own `tui.altScreen.previousPrompt` (`scrollToPrompt`) |
-| Click target | **Strip cells only.** Reuse grok-tui's zero-width OSC 9999 hit marker + `injectFoldRow` press-injection. Do not wrap any other row. |
-| Click action | `scrollView.scrollTo(promptRow, { disableFollow: true })` — message first row top-aligned (same landing as pi's `⌥↑`) — then `requestRender()` |
-| Style | Faint/dim strip background text; hover (existing `hoveredFoldId`) brightens the strip |
-| Drag | Unmoved click only (pi already drops OSC 8 after motion) |
-| Dialogs | Paint before overlay compositing, so real overlays (dialogs, search) cover the strip |
-| Fail-soft | Missing prototype / layout shape / seam → no strip, no errors |
+| Scope | Fullscreen (`TuiAltScreen`), away from follow-end |
+| Shape | Exactly one strip, `❯` + one line of text, terminal-column truncation with `…` |
+| Placement | Cover the first transcript viewport row, preserving the scrollbar cell; no layout shift |
+| User identification | Private zero-width `user-start` / `user-end` markers on `UserMessageComponent.render()` output only |
+| Preview | First nonblank rendered text **within the marked user block**, not its top padding |
+| Target | Nearest marked block start strictly `< scrollTop` |
+| Landing | `scrollTo(blockStart, { disableFollow: true })`; top padding is covered by the new strip and the jumped-to message's first text line remains visible immediately below it |
+| Style | User bubble background `#0f1217`, purple `❯`, faint text; hover `#2c2c2c` |
+| Click | Existing OSC 9999 fold marker and press-only OSC 8 injection; unchanged text selection/drag semantics |
+| Hit priority | Float wins over interactive tool/body regions beneath it, never over dialogs or scrollbar cells |
+| Hide | Following output, no earlier user message, unsupported seam, narrow viewport, or real overlay/dialog open |
+| Reload | Existing message components are marked at render time; arrowless native bodies still yield `❯` previews |
+| Cleanup | Restore render/mouse prototype methods; release the float handler and hover state |
 
-## Non-goals
+## Why the original implementation did not display
 
-- Regular-mode strip (terminal scrollback; no viewport overlay).
-- Stacked deck / multiple strips / strip history.
-- Keyboard bindings (pi already has `previousPrompt` / `nextPrompt`).
-- `showOverlay()` / `widgetContainerAbove` placement (wheel events may be eaten by overlays).
-- Persisting scroll position.
+Pi 0.99.2 emits OSC 133 A on the **blank top padding row**, for both user messages and tool-free assistant messages. The original implementation treated it as a user-only text row, formatted an empty preview, then returned without painting.
+
+The original fake-layout smoke put text on that marker row, so it could not reproduce the real failure. The corrected regression tests use actual message components, ScrollView, layout, TuiAltScreen, and mouse input. OSC 133 remains untouched for native navigation; it is no longer used to identify users.
 
 ## Architecture
 
-- Pure helpers in `extensions/prompt-jump-core.ts`:
-  - `findPromptRows(lines)` — row indices matching `^\x1b\]133;A` (BEL or ST terminated).
-  - `pickFloatTarget({ promptRows, scrollTop })` — the largest prompt row strictly `< scrollTop` (undefined when none). After a jump to row `R`, `scrollTop === R`, so the same rule yields the message before `R`.
-  - `formatStrip(rawRow, width)` — strip ANSI/OSC 133 prefix, truncate one line with `…`.
-- Paint + click wiring in `extensions/prompt-jump.ts`:
-  - Patch `TuiAltScreen.prototype.applySearchHighlights(screen, layout)` (runs before overlay compositing).
-  - Locate the primary scroll view's `LayoutBox` (`rect`, `scrollContentLines`, `scrollView`) by walking `layout.root`; `layout.primaryScrollView` identifies the view. A local walk avoids depending on pi-tui's unexported `getScrollViewBox`.
-  - Paint the strip on screen row `box.rect.y`, replacing the covered row content (any fold marker of the covered row is discarded with it).
-  - `registerFoldHandler(id, jump)` + `withFoldMarker(strip, id, width)`; `jump` calls `scrollTo(promptRow, { disableFollow: true })` then `requestRender()`.
-  - Hover: when `getState().hoveredFoldId === id`, brighten the strip.
-- Mount from `extensions/grok-tui.ts` alongside the other patches; unpatch restores the original prototype method.
+- `extensions/user-message-style.ts`: wraps `UserMessageComponent.render()` to append user-only start/end OSC 9999 markers to copied rows, without changing widths, heights, native OSC 133 prefixes, or cached source arrays. Rendering rather than construction also covers pre-reload message instances.
+- `extensions/prompt-jump-core.ts`: `markUserMessageRows`, `findUserMessageTarget`, and `formatStrip`. Search backwards for the nearest user anchor and read its preview within the component boundary only.
+- `extensions/prompt-jump.ts`: wraps `applySearchHighlights(screen, layout)` to paint before native overlay composition. Uses the primary scroll box's current content lines and geometry every frame, so resize/folding does not reuse stale row offsets.
+- Click handler registry: fixed `prompt-jump` key, refreshed each paint. `handleMouseEvent` routes hits on the actual painted strip to the existing `handleSelectionMouseEvent` fold path before underlying MouseRegions can consume them. Dialogs, other component captures and scrollbar cells retain native routing.
+- Painting preserves the rightmost scrollbar cell. Segment reset is placed **after** the strip: putting an OSC 8 close before its text would cancel click-fold's temporarily injected hyperlink.
+- `extensions/grok-tui.ts` mounts and disposes the patch with the other display patches.
 
-Seams (pi-tui 0.99.x): `isFollowingOutput`, `ScrollView.scrollTo(scrollTop, { disableFollow })`, `ScrollView.scrollTop`, `applySearchHighlights(screen, layout)` (before overlays), `LayoutFrame.primaryScrollView` / `LayoutBox.rect` / `scrollContentLines`, OSC 133 prompt-start rows (`^\x1b\]133;A`).
+## Non-goals
 
-## Error handling
+- Regular-terminal-scrollback overlays.
+- Multi-strip decks, keyboard rebinding, persisted scroll position.
+- Changing pi core or model/session content.
 
-- Every seam access is guarded; anything unexpected skips painting for that frame (never throws out of `doRender`).
-- Click handler runs inside the existing fold dispatch try/catch; a stale row index clamps to `scrollContentLines` bounds before `scrollTo`.
-- Uninstall restores the original `applySearchHighlights` exactly.
+## Verification
 
-## Testing
-
-`prompt-jump.test.mjs` (node --test, matching the repo's existing suites):
-
-- `findPromptRows`: BEL vs ST terminators, non-prompt OSC 133 zones (B/C) ignored, match strictly at line start (a row whose OSC 133 marker is preceded by other content is not a prompt start).
-- `pickFloatTarget`: no prompts, prompt at `scrollTop` (excluded → previous one wins), prompt above with gaps, `scrollTop === 0`.
-- `formatStrip`: ANSI stripped, CJK width truncation with `…`, empty row.
-
-Manual: fullscreen, wheel up mid-transcript → strip appears; click → message top-aligned, strip swaps to the older message; scroll to bottom → strip disappears.
+- `prompt-jump.test.mjs`: user-only bounded anchors, unchanged row/cache data, empty/edge inputs, Unicode widths and control-sequence stripping.
+- `prompt-jump-integration.test.mjs`: actual message rendering and fullscreen layout with only terminal I/O replaced. Wheel-up, successive SGR clicks, visible landing text, pre-reload instances, covered interactive body, drag selection, scrollbar, dialog priority, resize, and return-to-end.
+- `npm run test:prompt-jump-pty`: launches the installed pi CLI in a real PTY with isolated config and a synthetic transcript, loads the actual grok-tui entry through pi's loader, sends wheel/press/release/End and `/reload`. A read-only frame observer records post-render state. No model calls or personal session data.

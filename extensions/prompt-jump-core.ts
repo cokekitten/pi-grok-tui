@@ -1,55 +1,55 @@
-/**
- * Prompt-jump float — pure helpers.
- *
- * The float strip shows the most recent user message whose first row is
- * above the fullscreen transcript viewport top. User-message rows are the
- * OSC 133 prompt-start rows (`^\x1b\]133;A`), the same marker pi's own
- * `tui.altScreen.previousPrompt` (scrollToPrompt) scans.
- */
+/** User-only transcript anchors and one-line previews (display-only). */
 import { stripTerminalSequences, truncateToWidth } from "@earendil-works/pi-tui";
 
-/** Prompt start at line start only (BEL or ST terminated). */
-export const PROMPT_ROW_RE = /^\x1b\]133;A(?:\x07|\x1b\\)/;
+// OSC 133 is not a role marker: pi also emits it for assistant messages, and
+// puts it on the empty top padding. Keep it intact for native prompt navigation
+// and add our own bounded user-only anchor to the rendered component rows.
+const USER_START = "\x1b]9999;pi-grok-tui/v1/user-start\x07";
+const USER_END = "\x1b]9999;pi-grok-tui/v1/user-end\x07";
 
-/** Leading OSC 133 zone marks (A/B/C in any combination). */
-const ZONE_PREFIX_RE = /^(?:\x1b\]133;[ABC](?:\x07|\x1b\\))+/;
-
-/** Row indices of user-message (prompt-start) rows, ascending. */
-export function findPromptRows(lines: readonly string[]): number[] {
-  const rows: number[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (PROMPT_ROW_RE.test(lines[i] ?? "")) rows.push(i);
-  }
-  return rows;
+/** Copy rather than mutate pi's render cache. Row counts/widths stay unchanged. */
+export function markUserMessageRows(lines: readonly string[]): string[] {
+  if (lines.length === 0) return [];
+  const marked = [...lines];
+  if (!marked[0].includes(USER_START)) marked[0] += USER_START;
+  const last = marked.length - 1;
+  if (!marked[last].includes(USER_END)) marked[last] += USER_END;
+  return marked;
 }
+
+export type UserMessageTarget = { row: number; preview: string };
 
 /**
- * The float target: the largest prompt row strictly above `scrollTop`.
- * After a jump to row R, scrollTop === R, so this yields the message
- * before R — the strip keeps stepping upward.
+ * Nearest user block strictly above the viewport. Jump to its top padding;
+ * the new strip replaces that empty row, leaving the message text below it.
+ * Read the preview inside this block only, never from a later assistant/tool.
  */
-export function pickFloatTarget(
-  promptRows: readonly number[],
+export function findUserMessageTarget(
+  lines: readonly string[],
   scrollTop: number,
-): number | undefined {
+): UserMessageTarget | undefined {
   if (!Number.isFinite(scrollTop) || scrollTop <= 0) return undefined;
-  let target: number | undefined;
-  for (const row of promptRows) {
-    if (row < scrollTop && (target === undefined || row > target)) target = row;
+  for (let row = Math.min(lines.length - 1, Math.ceil(scrollTop) - 1); row >= 0; row--) {
+    if (!lines[row].includes(USER_START)) continue;
+    for (let bodyRow = row; bodyRow < lines.length; bodyRow++) {
+      const raw = lines[bodyRow];
+      if (bodyRow > row && raw.includes(USER_START)) break;
+      const preview = stripTerminalSequences(raw).trim();
+      if (preview) return { row, preview };
+      if (raw.includes(USER_END)) break;
+    }
+    // An empty user message still belongs to this block; don't borrow another
+    // message's text or pretend the previous user was the nearest one.
+    return undefined;
   }
-  return target;
+  return undefined;
 }
 
-/** One-line plain-text preview of a rendered prompt row (keeps the `❯`). */
+/** Terminal-column-aware preview; never leak ANSI/OSC from the source row. */
 export function formatStrip(rawRow: string, width: number): string {
-  if (typeof rawRow !== "string" || !Number.isFinite(width) || width <= 0) {
-    return "";
-  }
-  const text = stripTerminalSequences(rawRow.replace(ZONE_PREFIX_RE, "")).trim();
+  if (typeof rawRow !== "string" || !Number.isFinite(width) || width <= 0) return "";
+  const text = stripTerminalSequences(rawRow).trim();
   if (!text) return "";
-  // truncateToWidth may inject reset codes around the ellipsis; the input is
-  // plain text, so strip again for a clean preview.
-  return stripTerminalSequences(
-    truncateToWidth(text, Math.max(1, width), "\u2026"),
-  );
+  // truncateToWidth injects reset codes around the ellipsis, even for plain text.
+  return stripTerminalSequences(truncateToWidth(text, Math.floor(width), "…"));
 }

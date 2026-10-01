@@ -1,5 +1,7 @@
 # Fullscreen previous-message jump float — Implementation Plan
 
+> **2026-10-02 correction:** This original plan's OSC 133 assumption was wrong: pi marks the blank padding of both user and assistant blocks. The updated spec supersedes that identification/preview design. The shipped fix marks real `UserMessageComponent.render()` boundaries, reads body previews, preserves the landing text/scrollbar, and routes float clicks ahead of covered MouseRegions. Verification now includes `prompt-jump-integration.test.mjs` (real components and SGR input) and `npm run test:prompt-jump-pty` (actual CLI/jiti/PTY, wheel/click/End/reload, synthetic data only). The old fake-layout smoke is not acceptance evidence.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** In pi fullscreen TUI, float a single one-line strip at the top of the transcript viewport showing the most recent user message scrolled past; click jumps to it (first row top-aligned), and the strip updates to the next older message.

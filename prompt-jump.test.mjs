@@ -1,84 +1,72 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import {
-  findPromptRows,
-  formatStrip,
-  pickFloatTarget,
-  PROMPT_ROW_RE,
-} from "./extensions/prompt-jump-core.ts";
+import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
+import { markUserMessageRows, findUserMessageTarget, formatStrip } from "./extensions/prompt-jump-core.ts";
 
-describe("findPromptRows", () => {
-  it("matches OSC 133 prompt-start rows (BEL and ST)", () => {
-    const lines = [
-      "plain",
-      "\x1b]133;A\x07\xe2\x9d\xaf hi",
-      "\x1b]133;B\x07x",
-      "\x1b]133;C\x07y",
-      "x\x1b]133;A\x07z",
-      "\x1b]133;A\x1b\\st row",
-    ];
-    assert.deepEqual(findPromptRows(lines), [1, 5]);
+const prompt = "\x1b]133;A\x07";
+const end = "\x1b]133;B\x07\x1b]133;C\x07";
+const user = (text) => markUserMessageRows([prompt + "  ", ` ❯ ${text} `, end + "  "]);
+
+describe("user-only rendered anchors", () => {
+  it("does not mutate cached lines or native OSC 133, and preserves row widths", () => {
+    const rows = [prompt + "  ", " ❯ hello ", end + "  "];
+    const saved = [...rows];
+    const marked = markUserMessageRows(rows);
+    assert.deepEqual(rows, saved);
+    assert.notEqual(marked, rows);
+    assert.ok(marked[0].startsWith(prompt));
+    assert.deepEqual(marked.map(visibleWidth), rows.map(visibleWidth));
+    assert.deepEqual(marked.map(stripTerminalSequences), rows.map(stripTerminalSequences));
+    assert.deepEqual(markUserMessageRows(marked), marked);
   });
 
-  it("ignores empty lines and ANSI-only rows", () => {
-    assert.deepEqual(findPromptRows(["", "\x1b[0m", "\x1b[2m\x1b[22m"]), []);
+  it("takes the preview from the real body, not the empty prompt padding", () => {
+    assert.deepEqual(findUserMessageTarget(user("hello"), 2), { row: 0, preview: "❯ hello" });
   });
 
-  it("returns [] for empty input", () => {
-    assert.deepEqual(findPromptRows([]), []);
+  it("ignores assistant OSC 133 zones even when they contain a quoted ❯", () => {
+    const rows = [...user("first"), prompt, "❯ assistant quote", end, ...user("second"), prompt, "assistant answer", end];
+    assert.deepEqual(findUserMessageTarget(rows, 9), { row: 6, preview: "❯ second" });
+    assert.deepEqual(findUserMessageTarget(rows, 6), { row: 0, preview: "❯ first" });
   });
 
-  it("PROMPT_ROW_RE anchors at line start", () => {
-    assert.equal(PROMPT_ROW_RE.test("\x1b]133;A\x07x"), true);
-    assert.equal(PROMPT_ROW_RE.test(" \x1b]133;A\x07x"), false);
-    assert.equal(PROMPT_ROW_RE.test("\x1b]133;B\x07x"), false);
-  });
-});
-
-describe("pickFloatTarget", () => {
-  it("returns undefined when no prompt rows", () => {
-    assert.equal(pickFloatTarget([], 10), undefined);
+  it("never borrows a later message as an empty user's preview", () => {
+    const rows = [...markUserMessageRows([prompt, end]), "assistant answer", ...user("later")];
+    assert.equal(findUserMessageTarget(rows, 2), undefined);
+    const incomplete = [...markUserMessageRows([""]), ...user("later")];
+    assert.equal(findUserMessageTarget(incomplete, 1), undefined);
   });
 
-  it("picks the largest row strictly below scrollTop", () => {
-    assert.equal(pickFloatTarget([3, 7, 12], 10), 7);
-    assert.equal(pickFloatTarget([3, 7, 12], 100), 12);
-  });
-
-  it("excludes a prompt exactly at scrollTop", () => {
-    assert.equal(pickFloatTarget([3, 7, 12], 12), 7);
-  });
-
-  it("returns undefined when nothing is above the viewport top", () => {
-    assert.equal(pickFloatTarget([3, 7, 12], 3), undefined);
-    assert.equal(pickFloatTarget([3, 7, 12], 0), undefined);
-    assert.equal(pickFloatTarget([3, 7, 12], -5), undefined);
+  it("handles a one-row message and successive jumps to the beginning", () => {
+    const rows = markUserMessageRows(["❯ single"]);
+    assert.deepEqual(findUserMessageTarget(rows, 1), { row: 0, preview: "❯ single" });
+    assert.equal(findUserMessageTarget(rows, 0), undefined);
+    assert.equal(findUserMessageTarget(rows, -1), undefined);
+    assert.equal(findUserMessageTarget(rows, NaN), undefined);
+    assert.equal(findUserMessageTarget([], 5), undefined);
+    assert.deepEqual(markUserMessageRows([]), []);
   });
 });
 
 describe("formatStrip", () => {
-  it("strips OSC 133 prefixes and ANSI styling", () => {
-    const raw =
-      "\x1b]133;A\x07\x1b[38;2;196;167;231m\u276f\x1b[39m \x1b[2mhello\x1b[22m";
-    assert.equal(formatStrip(raw, 100), "\u276f hello");
+  it("strips private anchors and other terminal styling", () => {
+    const raw = markUserMessageRows([prompt + "\x1b[31m❯ hello\x1b[0m"])[0];
+    assert.equal(formatStrip(raw, 100), "❯ hello");
   });
-
-  it("strips stacked OSC 133 zone prefixes", () => {
-    assert.equal(formatStrip("\x1b]133;A\x07\x1b]133;B\x07x", 100), "x");
-  });
-
-  it("truncates ASCII with an ellipsis only when needed", () => {
-    assert.equal(formatStrip("abcdef", 4), "abc\u2026");
+  it("truncates ASCII only when necessary, without leaking ANSI resets", () => {
+    assert.equal(formatStrip("abcdef", 4), "abc…");
     assert.equal(formatStrip("abc", 3), "abc");
   });
-
-  it("truncates CJK by display width", () => {
-    assert.equal(formatStrip("\u4e2d\u4e2d\u4e2d", 4), "\u4e2d\u2026");
+  it("truncates CJK and emoji using display columns", () => {
+    assert.equal(formatStrip("中中中", 4), "中…");
+    const text = formatStrip("❯ 🐈🐈🐈🐈", 7);
+    assert.ok(visibleWidth(text) <= 7);
+    assert.ok(text.endsWith("…"));
   });
-
-  it("returns empty string for empty or marker-only rows", () => {
+  it("returns empty for blank content or invalid width", () => {
     assert.equal(formatStrip("", 10), "");
-    assert.equal(formatStrip("\x1b]133;A\x07", 10), "");
-    assert.equal(formatStrip("anything", 0), "");
+    assert.equal(formatStrip(prompt, 10), "");
+    assert.equal(formatStrip("text", 0), "");
+    assert.equal(formatStrip("text", Infinity), "");
   });
 });
