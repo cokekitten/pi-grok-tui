@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-01
 **Repo:** `pi-grok-tui`
-**Status:** Draft — pending user review
+**Status:** Implemented (user waived the spec-review gate)
 
 ## Goal
 

@@ -39,6 +39,12 @@ Grok-flavored TUI for [pi](https://github.com/earendil-works/pi-coding-agent) �
 - Leading `❯` in `#c4a7e7`
 - Assistant / tool rows indented to line up with the arrow column
 
+### Message jump float
+
+- While the fullscreen transcript is scrolled away from the bottom, a one-line strip floats at the top of the viewport showing the most recent user message scrolled past (`❯ …`, truncated with `…`).
+- **Click the strip** to jump to that message — its first row lands at the top of the viewport (same landing as pi's `⌥↑ previousPrompt`). The strip then shows the next older user message.
+- Scrolling back to the bottom hides the strip. Regular TUI is unchanged. Fail-soft: if a pi seam is missing, there is simply no strip.
+
 ### Editor
 
 - Keeps the main input editor and footer visually docked at the bottom while the transcript is shorter than the terminal.
@@ -86,6 +92,7 @@ After installing, restart pi or run `/reload`.
 | Click write block (fullscreen) | Toggle native 10-line preview ↔ full |
 | Hover a foldable block (fullscreen) | Highlight the whole block, including blank lines |
 | Click compaction chrome (fullscreen) | Expand/collapse that compaction summary |
+| Click the top float strip (fullscreen) | Jump to that user message (first row top-aligned) |
 | `⌥T` / `Alt+T` / `Ctrl+Shift+H` | Expand/collapse all thinking |
 | `Ctrl+O` | Cycle tool views (compact → preview → full) |
 
