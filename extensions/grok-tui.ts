@@ -12,6 +12,7 @@ import { installCompactionStylePatch } from "./compaction-style.js";
 import { installCustomMessageCollapsePatch } from "./custom-message-collapse.js";
 import { installEditorDockPatch } from "./editor-dock.js";
 import { installParentStamp } from "./parent-stamp.js";
+import { installPromptJumpPatch } from "./prompt-jump.js";
 import { installClickFoldPatch, resetFoldHandlers } from "./click-fold.js";
 import { clearFoldRegistry } from "./fold-body.js";
 import { installSkillFlatPatch } from "./skill-flat.js";
@@ -47,6 +48,7 @@ async function installPatch(): Promise<() => void> {
   let cleanupCycle: (() => void) | undefined;
   let cleanupSkill: (() => void) | undefined;
   let cleanupUser: (() => void) | undefined;
+  let cleanupJump: (() => void) | undefined;
   try {
     cleanupTools = await installToolCollapsePatch();
   } catch (error) {
@@ -95,6 +97,14 @@ async function installPatch(): Promise<() => void> {
       error instanceof Error ? error.message : error,
     );
   }
+  try {
+    cleanupJump = installPromptJumpPatch();
+  } catch (error) {
+    console.warn(
+      "pi-grok-tui: prompt jump patch failed:",
+      error instanceof Error ? error.message : error,
+    );
+  }
   return () => {
     cleanupThinking();
     cleanupTools?.();
@@ -105,6 +115,7 @@ async function installPatch(): Promise<() => void> {
     cleanupUser?.();
     cleanupEditorDock();
     cleanupStamp();
+    cleanupJump?.();
     cleanupClick?.();
   };
 }
