@@ -5,21 +5,19 @@
  *
  * Display-only; does not change session data.
  */
-import { Box, Markdown } from "@earendil-works/pi-tui";
 import { markUserMessageRows } from "./prompt-jump-core.ts";
-import { ansiBgHex, ansiFgHex } from "./chrome.ts";
 import {
   importInternal,
   PI_CODING_AGENT,
   INTERNAL_MODULES,
 } from "./internal-import.ts";
+import { createArrowMarkdownBody } from "./user-message-body.ts";
 
-/** Near-black user bubble (requested). */
-export const USER_MESSAGE_BG = "#0f1217";
-/** Soft purple/iris arrow (requested). */
-export const USER_MESSAGE_ARROW_FG = "#c4a7e7";
-/** Arrow glyph — single cell wide in most terminals. */
-export const USER_MESSAGE_ARROW = "❯";
+export {
+  USER_MESSAGE_BG,
+  USER_MESSAGE_ARROW_FG,
+  USER_MESSAGE_ARROW,
+} from "./user-message-body.ts";
 
 interface UserMessageProto {
   text: string;
@@ -29,49 +27,6 @@ interface UserMessageProto {
   addChild(c: unknown): void;
   rebuild(): void;
   render(width: number): string[];
-}
-
-/** Body that renders markdown with a colored arrow on the first line. */
-function createArrowMarkdownBody(
-  text: string,
-  markdownTheme: unknown,
-  themeFg: (color: string, content: string) => string,
-): { render(width: number): string[]; invalidate?(): void } {
-  const arrow = ansiFgHex(USER_MESSAGE_ARROW_FG, USER_MESSAGE_ARROW) + " ";
-  // ❯ + space → 2 columns in typical terminals
-  const pad = "  ";
-
-  const md = new Markdown(
-    text,
-    0,
-    0,
-    markdownTheme as any,
-    {
-      color: (content: string) => themeFg("userMessageText", content),
-    },
-    { preserveOrderedListMarkers: true, preserveBackslashEscapes: true },
-  );
-
-  return {
-    render(width: number): string[] {
-      const bodyWidth = Math.max(1, width - 2);
-      let lines: string[];
-      try {
-        lines = md.render(bodyWidth);
-      } catch {
-        lines = [text];
-      }
-      if (lines.length === 0) return [arrow.trimEnd()];
-      return lines.map((line, i) => (i === 0 ? arrow + line : pad + line));
-    },
-    invalidate() {
-      try {
-        (md as { invalidate?: () => void }).invalidate?.();
-      } catch {
-        /* ignore */
-      }
-    },
-  };
 }
 
 export async function installUserMessageStylePatch(): Promise<() => void> {
@@ -110,11 +65,11 @@ export async function installUserMessageStylePatch(): Promise<() => void> {
   prototype.rebuild = function (this: UserMessageProto) {
     try {
       this.clear();
-      // Same padding as native (outputPad, paddingY=1); bg is #0f1217.
-      const contentBox = new Box(this.outputPad ?? 1, 1, (content: string) =>
-        ansiBgHex(USER_MESSAGE_BG, content),
-      );
-      contentBox.addChild(
+      // No Box: pi 1.0.0 removed that shape upstream (a full-width copy of
+      // every line, and its per-line cache misses defeated Box's identity
+      // check every frame). user-message-body.ts reproduces the exact pad+bg
+      // pipeline and wrap widths instead, so the rendered bytes are unchanged.
+      this.addChild(
         createArrowMarkdownBody(
           this.text,
           this.markdownTheme,
@@ -125,9 +80,9 @@ export async function installUserMessageStylePatch(): Promise<() => void> {
               return content;
             }
           },
-        ) as any,
+          this.outputPad ?? 1,
+        ),
       );
-      this.addChild(contentBox);
     } catch {
       // Fall back to native rebuild if anything goes wrong
       try {
