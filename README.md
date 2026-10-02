@@ -38,6 +38,7 @@ Grok-flavored TUI for [pi](https://github.com/earendil-works/pi-coding-agent) �
 - Background bubble `#0f1217`
 - Leading `❯` in `#c4a7e7`
 - Assistant / tool rows indented to line up with the arrow column
+- Already-rendered history is re-styled automatically: after a restart, `/reload`, or a session resume, user messages created before the patch was (re)installed are rebuilt with the current style at their first paint — each instance at most once per patch generation.
 
 ### Message jump float
 
