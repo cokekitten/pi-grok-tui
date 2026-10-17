@@ -15,6 +15,19 @@ export function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
 }
 
+/**
+ * pi's write call renderer keeps an incremental syntax-highlight cache on a
+ * field literally named `cache` (WriteCallRenderComponent.cache):
+ * `{ rawPath, lang, rawContent, normalizedLines, highlightedLines }`.
+ */
+function isIncrementalHighlightCache(cache: unknown): boolean {
+  return (
+    !!cache &&
+    typeof cache === "object" &&
+    Array.isArray((cache as { highlightedLines?: unknown }).highlightedLines)
+  );
+}
+
 /** Clear render caches without calling invalidate() (avoids updateDisplay re-entry). */
 function clearRenderCache(n: {
   cache?: unknown;
@@ -24,14 +37,19 @@ function clearRenderCache(n: {
   invalidateCache?: () => void;
 }): void {
   try {
-    n.cache = undefined;
+    // NEVER blanket-clear `cache`: tool call renderers reuse that field name for
+    // incremental work that must survive a repaint. Wiping the write renderer's
+    // highlight cache makes pi re-highlight the whole file on every streamed
+    // args delta (highlight.js O(n²) — a long write freezes the TUI). Box's
+    // render cache still gets dropped through invalidateCache().
+    if (typeof n.invalidateCache === "function") {
+      n.invalidateCache();
+    } else if (n.cache !== undefined && !isIncrementalHighlightCache(n.cache)) {
+      n.cache = undefined;
+    }
     n.cachedText = undefined;
     n.cachedWidth = undefined;
     n.cachedLines = undefined;
-    // Box has invalidateCache that only clears cache — safe
-    if (typeof n.invalidateCache === "function") {
-      n.invalidateCache();
-    }
   } catch {
     /* ignore */
   }

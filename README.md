@@ -101,6 +101,8 @@ After installing, restart pi or run `/reload`.
 
 This extension monkey-patches pi’s internal TUI components, including locating pi's `CustomEditor` and padding the root layout for editor docking. It may need updates if pi changes those internals. The dock is visual padding, not a separate scrollable message pane.
 
+Restyling must never blanket-clear a component's `cache` field: pi's write renderer keeps its incremental syntax-highlight cache there (`WriteCallRenderComponent.cache`). Wiping it makes pi re-highlight the whole file on every streamed args delta (highlight.js O(n²)), which freezes the TUI while a long file is written. `flat-style.ts` therefore only drops non-highlight caches; `write-highlight-cache.test.mjs` locks this in.
+
 Formerly **`pi-thinking-scroll`** (repo renamed to `pi-grok-tui`).
 
 ## Development
