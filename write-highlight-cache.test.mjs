@@ -40,6 +40,7 @@ describe("stripBgDeep vs write highlight cache", () => {
     const component = writeComponent();
 
     component.updateArgs(args("const a = 1;"));
+    component.render(80);
     const first = component.callRendererComponent?.cache;
     assert.ok(first, "write renderer should build a highlight cache");
     assert.ok(Array.isArray(first.highlightedLines), "cache should be a highlight cache");
@@ -48,6 +49,7 @@ describe("stripBgDeep vs write highlight cache", () => {
     stripBgDeep(component);
 
     component.updateArgs(args("const a = 1;\nconst b = 2;"));
+    component.render(80);
     const second = component.callRendererComponent?.cache;
     assert.equal(second, first, "highlight cache must survive stripBgDeep");
     assert.equal(second.highlightedLines.length, 2, "second line highlighted incrementally");

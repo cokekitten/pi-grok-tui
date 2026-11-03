@@ -105,13 +105,26 @@ Restyling must never blanket-clear a component's `cache` field: pi's write rende
 
 Formerly **`pi-thinking-scroll`** (repo renamed to `pi-grok-tui`).
 
+## Pi 1.5 compatibility
+
+Version 0.3.5 preserves Pi 1.5's streamed Markdown/highlight caches and deferred tool-argument rendering. User bubbles, assistant text and visible thinking forward registered Markdown transformers with the actual content width, current streaming state, and saved entry IDs/ISO timestamps where available. These remain display-only changes; message content is untouched.
+
+Updates are listed in [CHANGELOG.md](CHANGELOG.md), included in the package for Pi 1.5's Extension Updates notices. There are no changes to the existing colors, folding rules or keyboard shortcuts.
+
 ## Development
 
+Use a current Node.js 24 release for the native TypeScript test loader. Host packages remain external peers. For a managed Pi installation, link tests to its active release; repeat after upgrading Pi (the script replaces only symlinks, never real dependency directories):
+
 ```bash
+npm run test:setup
+# For a non-managed installation instead:
+# npm run test:setup -- /absolute/path/to/pi/node_modules
 npm test
 # Optional real pi CLI/PTY regression (python3 + pi on PATH; isolated synthetic session):
 npm run test:prompt-jump-pty
 ```
+
+The test-only loader resolves source `.js` imports to `.ts` and enables TypeScript parameter-property transformation; production still loads through pi/jiti. Fullscreen navigation tests use `Ctrl+End` to return to the latest output.
 
 Package entry: `package.json` → `pi.extensions` → `./extensions/grok-tui.ts`.
 

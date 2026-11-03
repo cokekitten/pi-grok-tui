@@ -10,6 +10,7 @@ import {
 import { getPreviousSibling, shouldGapAfter } from "./parent-stamp.js";
 import { RESPONSE_LEFT_PAD, safeFg } from "./chrome.js";
 import { ThinkingScrollComponent, type ThinkingThemeLike } from "./thinking-render.js";
+import { markdownTransformFor, type MarkdownTransformSource } from "./markdown-transform.ts";
 
 interface ContentBlock {
   type: string;
@@ -28,8 +29,9 @@ interface AssistantMessage {
   errorMessage?: string;
 }
 
-interface AssistantMessageComponentProto {
-  updateContent(message: AssistantMessage): void;
+interface AssistantMessageComponentProto extends MarkdownTransformSource {
+  updateContent(message: AssistantMessage, isStreaming?: boolean): void;
+  outputPad?: number;
   setHideThinkingBlock(hide: boolean): void;
   setHiddenThinkingLabel(label: string): void;
   contentContainer: {
@@ -71,18 +73,39 @@ export async function installThinkingPatch(): Promise<() => void> {
   const originalSetHideThinkingBlock = prototype.setHideThinkingBlock;
   const originalSetHiddenThinkingLabel = prototype.setHiddenThinkingLabel;
 
+  type RenderSlot =
+    | { kind: "text"; component: Markdown }
+    | { kind: "thinking"; component: ThinkingScrollComponent };
+  // Patch-local state neither retains old sessions nor collides with Pi's own
+  // markdownSlots. A new patch generation starts with clean slots after /reload.
+  const renderStates = new WeakMap<object, {
+    slots: RenderSlot[];
+    markdownTheme: unknown;
+    outputPad?: number;
+    timestamp: number;
+  }>();
+
   const patchedUpdateContent = function (
     this: AssistantMessageComponentProto,
     message: AssistantMessage,
+    isStreaming = this.isStreaming ?? false,
   ) {
     this.lastMessage = message;
+    this.isStreaming = isStreaming;
 
     if (!this.contentContainer || typeof this.contentContainer.clear !== "function") {
-      return originalUpdateContent.call(this, message);
+      return originalUpdateContent.call(this, message, isStreaming);
     }
 
     try {
       this.contentContainer.clear();
+      const previous = renderStates.get(this);
+      const reusable = previous !== undefined &&
+        previous.markdownTheme === this.markdownTheme &&
+        previous.outputPad === this.outputPad && previous.timestamp === message.timestamp;
+      const previousSlots = reusable ? previous.slots : [];
+      const slots: RenderSlot[] = [];
+      renderStates.set(this, { slots, markdownTheme: this.markdownTheme, outputPad: this.outputPad, timestamp: message.timestamp });
 
       const thinkingBlocks = message.content.filter(
         (c) => c.type === "thinking" && !c.redacted && (c.thinking || "").trim().length > 0,
@@ -146,14 +169,17 @@ export async function installThinkingPatch(): Promise<() => void> {
         if (block.type === "text" && (block.text || "").trim().length > 0) {
           // Blank line before body when it follows thinking in this message
           // (hasTextAfterThinking path adds spacer after thinking instead).
-          this.contentContainer.addChild(
-            new Markdown(
-              (block.text || "").trim(),
-              padX,
-              0,
-              this.markdownTheme as any,
-            ),
+          const text = (block.text || "").trim();
+          const slot = previousSlots[slots.length];
+          const component = slot?.kind === "text" ? slot.component : new Markdown(
+            text, padX, 0, this.markdownTheme as any, undefined,
+            { transform: markdownTransformFor(this, "assistant") },
           );
+          // setText retains Pi 1.5's rendered-block/highlight cache, but clears
+          // final lines so a stream-end/context-only transition is transformed.
+          component.setText(text);
+          slots.push({ kind: "text", component });
+          this.contentContainer.addChild(component);
           continue;
         }
 
@@ -161,17 +187,15 @@ export async function installThinkingPatch(): Promise<() => void> {
           if (hasTextBeforeThinking) {
             this.contentContainer.addChild(new Spacer(1));
           }
-          this.contentContainer.addChild(
-            new ThinkingScrollComponent(
-              uiTheme,
-              this.markdownTheme,
-              message.timestamp,
-              thinkingBlocks.map((b) => ({
-                text: b.thinking || "",
-                redacted: b.redacted,
-              })),
-            ) as any,
+          const blocks = thinkingBlocks.map((b) => ({ text: b.thinking || "", redacted: b.redacted }));
+          const slot = previousSlots[slots.length];
+          const component = slot?.kind === "thinking" ? slot.component : new ThinkingScrollComponent(
+            uiTheme, this.markdownTheme, message.timestamp, blocks,
+            markdownTransformFor(this, "assistant-thinking"),
           );
+          component.setThinkingBlocks(blocks);
+          slots.push({ kind: "thinking", component });
+          this.contentContainer.addChild(component);
           renderedThinking = true;
           if (hasTextAfterThinking) {
             // chrome → prose gap

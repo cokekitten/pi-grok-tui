@@ -20,6 +20,7 @@ import {
   INTERNAL_MODULES,
 } from "./internal-import.ts";
 import { createArrowMarkdownBody } from "./user-message-body.ts";
+import { markdownTransformFor, type MarkdownTransformSource } from "./markdown-transform.ts";
 
 export {
   USER_MESSAGE_BG,
@@ -27,7 +28,7 @@ export {
   USER_MESSAGE_ARROW,
 } from "./user-message-body.ts";
 
-interface UserMessageProto {
+interface UserMessageProto extends MarkdownTransformSource {
   text: string;
   markdownTheme: unknown;
   outputPad: number;
@@ -121,6 +122,7 @@ export function createUserMessagePrototypePatch(
             }
           },
           this.outputPad ?? 1,
+          markdownTransformFor(this, "user"),
         ),
       );
     } catch {

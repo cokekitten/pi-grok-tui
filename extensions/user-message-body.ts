@@ -38,6 +38,7 @@ export function createArrowMarkdownBody(
   markdownTheme: unknown,
   themeFg: ThemeFg,
   outputPad = 1,
+  transform?: (markdown: string, availableWidth: number) => string,
 ): UserMessageBody {
   const arrow = ansiFgHex(USER_MESSAGE_ARROW_FG, USER_MESSAGE_ARROW) + " ";
   // ❯ + space → 2 columns in typical terminals
@@ -52,7 +53,7 @@ export function createArrowMarkdownBody(
     {
       color: (content: string) => themeFg("userMessageText", content),
     },
-    { preserveOrderedListMarkers: true, preserveBackslashEscapes: true },
+    { preserveOrderedListMarkers: true, preserveBackslashEscapes: true, transform },
   );
 
   // Cache: Markdown returns the same lines array on a cache hit, so an identity

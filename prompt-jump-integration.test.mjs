@@ -181,7 +181,7 @@ describe("prompt jump with real fullscreen components", () => {
     v.draw();
     // Reflow makes the earlier answer taller. Navigate back to the end so
     // SECOND USER is above the viewport again, then use the newly painted link.
-    v.input("\x1b[F");
+    v.input("\x1b[1;5F");
     v.wheelUp();
     v.clickTop();
     const screen = v.draw();
@@ -194,7 +194,7 @@ describe("prompt jump with real fullscreen components", () => {
     const screen = v.wheelUp();
     assert.ok(screen.some(r => plain(r).includes("LATEST")));
     assert.equal(parseFoldMarker(screen[1]), "prompt-jump");
-    const bottom = v.input("\x1b[F");
+    const bottom = v.input("\x1b[1;5F");
     assert.equal(tui.isFollowingOutput, true);
     assert.ok(!bottom.some(r => parseFoldMarker(r) === "prompt-jump"));
   });

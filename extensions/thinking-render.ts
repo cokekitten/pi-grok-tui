@@ -45,13 +45,23 @@ export class ThinkingScrollComponent {
   private cachedHoveredFoldId?: string;
   private cachedMarkdownKey?: string;
   private cachedMarkdownLines?: string[];
+  private markdown?: Markdown;
+  private markdownDimBody?: boolean;
 
   constructor(
     private theme: ThinkingThemeLike,
     private markdownTheme: unknown,
     private messageTimestamp: number,
     private thinkingBlocks: { text: string; redacted?: boolean }[],
+    private transform?: (markdown: string, availableWidth: number) => string,
   ) {}
+
+  setThinkingBlocks(blocks: { text: string; redacted?: boolean }[]): void {
+    this.thinkingBlocks = blocks;
+    // Context (e.g. isStreaming) can change even when source text does not.
+    // Keep Markdown's expensive block cache, but re-evaluate derived output.
+    this.cachedLines = undefined;
+  }
 
   render(width: number): string[] {
     const state = getState();
@@ -174,7 +184,8 @@ export class ThinkingScrollComponent {
     const preserveLineBreaks = options?.preserveLineBreaks ?? false;
     const maxSourceChars = options?.maxSourceChars;
     const dimBody = options?.dimBody ?? false;
-    let source = preserveLineBreaks ? text.replace(/\n/g, "  \n") : text;
+    const transformed = this.transform?.(text, Math.max(1, width)) ?? text;
+    let source = preserveLineBreaks ? transformed.replace(/\n/g, "  \n") : transformed;
     if (maxSourceChars !== undefined && source.length > maxSourceChars) {
       source = source.slice(0, maxSourceChars);
     }
@@ -184,14 +195,15 @@ export class ThinkingScrollComponent {
       return this.cachedMarkdownLines;
     }
 
-    const md = new Markdown(
-      source,
-      0,
-      0,
-      this.markdownTheme as any,
-      this.thinkingDefaultStyle(dimBody),
-    );
-    const lines = md.render(Math.max(1, width));
+    if (!this.markdown || this.markdownDimBody !== dimBody) {
+      this.markdown = new Markdown(
+        source, 0, 0, this.markdownTheme as any, this.thinkingDefaultStyle(dimBody),
+      );
+      this.markdownDimBody = dimBody;
+    } else {
+      this.markdown.setText(source);
+    }
+    const lines = this.markdown.render(Math.max(1, width));
     this.cachedMarkdownKey = key;
     this.cachedMarkdownLines = lines;
     return lines;
@@ -226,6 +238,7 @@ export class ThinkingScrollComponent {
   }
 
   invalidate(): void {
+    this.markdown?.invalidate();
     this.cachedLines = undefined;
     this.cachedWidth = undefined;
     this.lastRenderedText = "";

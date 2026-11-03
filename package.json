@@ -1,6 +1,6 @@
 {
   "name": "pi-grok-tui",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Grok-flavored pi TUI: compact thinking, tool chrome, user bubbles, spacing.",
   "type": "module",
   "license": "MIT",
@@ -14,7 +14,8 @@
     "ui"
   ],
   "scripts": {
-    "test": "node --experimental-strip-types --test tool-titles.test.mjs thinking-keys.test.mjs editor-dock.test.mjs click-fold-core.test.mjs click-fold-state.test.mjs click-fold.test.mjs thinking-click.test.mjs tool-click.test.mjs fold-body.test.mjs fold-hover.test.mjs prompt-jump.test.mjs prompt-jump-integration.test.mjs compaction-style.test.mjs flat-style.test.mjs user-message-style.test.mjs write-highlight-cache.test.mjs",
+    "test": "node --experimental-transform-types --disable-warning=ExperimentalWarning --import ./scripts/test-register.mjs --test tool-titles.test.mjs thinking-keys.test.mjs editor-dock.test.mjs click-fold-core.test.mjs click-fold-state.test.mjs click-fold.test.mjs thinking-click.test.mjs tool-click.test.mjs fold-body.test.mjs fold-hover.test.mjs prompt-jump.test.mjs prompt-jump-integration.test.mjs compaction-style.test.mjs flat-style.test.mjs user-message-style.test.mjs write-highlight-cache.test.mjs pi-1.5-compat.test.mjs test-host-setup.test.mjs",
+    "test:setup": "node scripts/link-test-host.mjs",
     "test:prompt-jump-pty": "python3 scripts/test-prompt-jump-pty.py"
   },
   "pi": {
@@ -29,6 +30,7 @@
   "files": [
     "extensions/",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ]
 }

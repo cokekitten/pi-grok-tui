@@ -53,6 +53,7 @@ interface ToolExecutionProto {
   cwd: string;
   expanded: boolean;
   isPartial: boolean;
+  argsPending?: boolean;
   result?: { isError?: boolean; content?: unknown; details?: unknown };
   hideComponent: boolean;
   contentBox: {
@@ -540,6 +541,9 @@ export async function installToolCollapsePatch(): Promise<() => void> {
   const patchedUpdateDisplay = function (this: ToolExecutionProto) {
     if (updating.has(this)) return;
     updating.add(this);
+    // Pi 1.5 defers streamed args until render(). Chrome/group branches skip
+    // native updateDisplay, so they must acknowledge the batch themselves.
+    this.argsPending = false;
     try {
       const { members, header, isHeader } = consecutiveGroup(this);
       const grouped = members.length >= 2 && getToolViewMode() === "chrome";

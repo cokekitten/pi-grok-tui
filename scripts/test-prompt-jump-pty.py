@@ -158,7 +158,7 @@ def main():
                  and "SYNTHETIC_USER_B" in f["screen"][f["viewportRow"] + 1])
             send(click(), "click-lands-on-A-no-older-float", lambda f: not f["strips"]
                  and "SYNTHETIC_USER_A" in f["screen"][f["viewportRow"] + 1])
-            send(b"\x1b[F", "end-hides-float", lambda f: f["following"] and not f["strips"])
+            send(b"\x1b[1;5F", "end-hides-float", lambda f: f["following"] and not f["strips"])
             old_installation = latest["installation"]
             send(b"/reload\r", "reload-installs-new-code", lambda f: f["installation"] != old_installation and f["following"])
             send(b"\x1b[<64;8;5M", "wheel-after-reload", lambda f: floating(f, "SYNTHETIC_USER_B"))
