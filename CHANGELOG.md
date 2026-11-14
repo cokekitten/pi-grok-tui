@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.6] - 2026-11-14
+
+### Fixed
+
+- Collapsing an image-bearing tool result no longer leaves Pi's image caches out of sync. Pi 1.5 re-adds images with `previousImages[index]` whenever `imageSources[index]` still matches, so chrome mode dropping the images while keeping the sources made `updateDisplay` push `undefined` into the component's children — the next paint died with `TypeError: Cannot read properties of undefined (reading 'render')` inside `Container.render`. `imageSources` is now cleared with the images, and any undefined child is dropped before paint as a last line of defence.
+
 ## [0.3.5] - 2026-11-04
 
 ### Fixed

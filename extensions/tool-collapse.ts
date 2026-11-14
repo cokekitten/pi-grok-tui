@@ -78,6 +78,7 @@ interface ToolExecutionProto {
   resultRendererComponent?: unknown;
   imageComponents: unknown[];
   imageSpacers: unknown[];
+  imageSources?: unknown[];
   children?: unknown[];
   ui?: { children?: unknown[] };
   hasRendererDefinition(): boolean;
@@ -186,6 +187,32 @@ function clearImages(self: ToolExecutionProto): void {
     }
     self.imageSpacers = [];
   }
+  // imageSources must go too: pi 1.5's updateDisplay() re-adds images with
+  //   imageComponent = previous ? previousImages[index] : new Image(...)
+  // where previous = imageSources[index]. A leftover source with no matching
+  // image makes it addChild(undefined) and the next paint throws
+  // "Cannot read properties of undefined (reading 'render')" in Container.render.
+  self.imageSources = [];
+}
+
+/**
+ * Last line of defence: a single undefined entry in a children array kills the
+ * whole TUI (Container.render calls child.render unconditionally), so drop any
+ * before pi paints. Splice in place — parent-stamp/findParentChildren keep
+ * references to these arrays.
+ */
+function dropUndefinedChildren(node: { children?: unknown[] } | undefined): void {
+  if (!Array.isArray(node?.children)) return;
+  const kids = node.children;
+  for (let i = kids.length - 1; i >= 0; i--) {
+    if (kids[i] === undefined) kids.splice(i, 1);
+  }
+}
+
+function sanitizeChildren(self: ToolExecutionProto): void {
+  dropUndefinedChildren(self);
+  dropUndefinedChildren(self.contentBox);
+  dropUndefinedChildren(self.selfRenderContainer);
 }
 
 /**
@@ -661,6 +688,7 @@ export async function installToolCollapsePatch(): Promise<() => void> {
         }
       }
     } finally {
+      sanitizeChildren(this);
       updating.delete(this);
     }
   };
