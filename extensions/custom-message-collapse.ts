@@ -51,6 +51,17 @@ function oneLine(s: string, max = 72): string {
   return [...flat].slice(0, max - 1).join("") + "…";
 }
 
+function clearChildren(target: CustomMessageProto): void {
+  for (const child of [...(target.children ?? [])]) {
+    try {
+      target.removeChild(child);
+    } catch {
+      /* ignore */
+    }
+  }
+  target.customComponent = undefined;
+}
+
 export async function installCustomMessageCollapsePatch(): Promise<() => void> {
   const [
     { CustomMessageComponent: raw },
@@ -99,15 +110,17 @@ export async function installCustomMessageCollapsePatch(): Promise<() => void> {
       }
 
       // Clear whatever rebuild previously attached
-      const kids = [...(this.children ?? [])];
-      for (const k of kids) {
-        try {
-          this.removeChild(k);
-        } catch {
-          /* ignore */
-        }
+      clearChildren(this);
+
+      // An extension renderer owns its own collapsed layout: pi-subagents draws
+      // "[subagent] worker needs a decision", pi-intercom draws its own card.
+      // Let it run first and only fall back to the raw one-line chrome when no
+      // renderer is registered or it declines to render.
+      if (this.customRenderer) {
+        originalRebuild.call(this);
+        if (this.customComponent) return;
+        clearChildren(this);
       }
-      this.customComponent = undefined;
 
       const type = this.message?.customType || "message";
       const body = oneLine(extractText(this.message));

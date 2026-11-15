@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.7] - 2026-11-15
+
+### Fixed
+
+- Chrome mode no longer replaces a custom message that an extension renders itself. The collapse patch cleared `CustomMessageComponent.customComponent` and drew `[customType] first line` for every `custom_message`, which bypassed Pi's registered message renderers: pi-subagents supervisor requests showed as `[subagent_supervisor_request] Subagent needs a supervisor decision. Run: …` instead of `[subagent] worker needs a decision`, pi-intercom cards lost their layout, and both lost their request body beyond 72 characters. The patch now runs the renderer first and only falls back to the one-line chrome row when no renderer is registered or it declines to render. Messages without a renderer (background tasks, web search notices) still collapse to one line.
+
 ## [0.3.6] - 2026-11-14
 
 ### Fixed
