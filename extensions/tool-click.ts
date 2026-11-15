@@ -10,6 +10,7 @@ import {
   renderClickableChrome,
 } from "./click-fold.ts";
 import {
+  getState,
   getToolViewMode,
   getViewOverride,
   isGroupExpanded,
@@ -188,21 +189,65 @@ export function clickableChromeChild(
 ): { render(width: number): string[]; invalidate(): void } {
   const pad = opts.pad ?? 0;
   const sp = pad > 0 ? " ".repeat(pad) : "";
+  const id = opts.groupHeader ? groupFoldId(opts.target) : idForTarget(opts.target);
+  const onClick = opts.groupHeader
+    ? () => {
+        toggleGroupAt(opts.target);
+      }
+    : () => {
+        toggleToolAt(opts.target, opts.toolName);
+      };
+
+  let cachedWidth: number | undefined;
+  let cachedTuiMode: string | undefined;
+  let cachedClickFoldReady: boolean | undefined;
+  let cachedHovered: boolean | undefined;
+  let cachedThemeSample: string | undefined;
+  let cachedLines: string[] | undefined;
+
   return {
     render(width: number) {
+      // Keep click dispatch alive across session-level resetFoldHandlers().
+      registerFoldHandler(id, onClick);
+      const state = getState();
+      const hovered =
+        state.tuiMode === "fullscreen" &&
+        state.clickFoldReady &&
+        state.hoveredFoldId === id;
+      const themeSample = theme.fg("muted", "m");
+      if (
+        cachedLines &&
+        cachedWidth === width &&
+        cachedTuiMode === state.tuiMode &&
+        cachedClickFoldReady === state.clickFoldReady &&
+        cachedHovered === hovered &&
+        cachedThemeSample === themeSample
+      ) {
+        return cachedLines;
+      }
       const inner = Math.max(1, width - pad);
-      return [
+      const line =
         sp +
-          renderToolChromeLine(inner, theme, {
-            target: opts.target,
-            toolName: opts.toolName,
-            kind: opts.kind,
-            label: opts.label,
-            failedSuffix: opts.failedSuffix,
-            groupHeader: opts.groupHeader,
-          }),
-      ];
+        renderClickableChrome(inner, theme, {
+          kind: opts.kind,
+          label: opts.label,
+          failedSuffix: opts.failedSuffix,
+          hintKind: "tool",
+          id,
+          onClick,
+        });
+      cachedWidth = width;
+      cachedTuiMode = state.tuiMode;
+      cachedClickFoldReady = state.clickFoldReady;
+      cachedHovered = hovered;
+      cachedThemeSample = themeSample;
+      cachedLines = [line];
+      return cachedLines;
     },
-    invalidate() {},
+    invalidate() {
+      cachedLines = undefined;
+      cachedWidth = undefined;
+      cachedThemeSample = undefined;
+    },
   };
 }

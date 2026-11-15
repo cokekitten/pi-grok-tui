@@ -249,9 +249,21 @@ export function installClickFoldPatch(): () => void {
     };
   }
 
+  const isWheelInput = (data: string): boolean => {
+    const sgr = /^\x1b\[<(\d+);\d+;\d+[Mm]$/.exec(data);
+    if (sgr) return (Number.parseInt(sgr[1]!, 10) & 64) !== 0;
+    if (data.length === 6 && data.startsWith("\x1b[M")) {
+      return ((data.charCodeAt(3) - 32) & 64) !== 0;
+    }
+    return false;
+  };
+
   if (typeof originalViewport === "function") {
     altProto.handleViewportInput = function (this: OpenUrlHost, data: string) {
-      if (data === "\x1b[O" && handleFoldHover(undefined, undefined)) {
+      if (
+        (data === "\x1b[O" || isWheelInput(data)) &&
+        handleFoldHover(undefined, undefined)
+      ) {
         try {
           this.requestRender?.();
         } catch {

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.8] - 2026-11-15
+
+### Fixed
+
+- Cache rendered line arrays across fullscreen scroll frames for `clickableChromeChild`, `wrapFoldBodyComponent`, marked `Text` fold bodies, `UserMessageComponent` boundary anchors, and the `prompt-jump` top strip, and clear stale `hoveredFoldId` on wheel input. Previously every scroll frame re-ran `truncateToWidth` (`Intl.Segmenter`), fold-marker regexes, and array/string allocations across every off-screen tool and custom message in the transcript (`doc.render` ~10.9ms → ~1.9ms on a 736-entry session, bringing full `doRender` from ~19.4ms down to native Pi's ~9.8ms).
+
 ## [0.3.7] - 2026-11-15
 
 ### Fixed

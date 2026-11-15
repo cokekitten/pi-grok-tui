@@ -87,6 +87,19 @@ export function unwrapMouseRegion(component: unknown): unknown {
  * is indented and carries the fold marker. Spaces go *before* the marker so
  * hover starts on the same column as self-shell chrome.
  */
+function sameLines(
+  a: readonly string[] | undefined,
+  b: readonly string[],
+): boolean {
+  if (!a) return false;
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 export function wrapFoldBodyComponent(
   component: FoldBodyComponent,
   id: string,
@@ -94,14 +107,41 @@ export function wrapFoldBodyComponent(
 ): FoldBodyComponent {
   const actualPad = Math.max(0, pad);
   const spaces = actualPad > 0 ? " ".repeat(actualPad) : "";
+  let cachedWidth: number | undefined;
+  let cachedActive: boolean | undefined;
+  let cachedHovered: boolean | undefined;
+  let cachedChildLines: readonly string[] | undefined;
+  let cachedOut: string[] | undefined;
+
   return {
     render(width: number) {
       const inner = Math.max(1, width - actualPad);
-      return component.render(inner).map(
+      const childLines = component.render(inner);
+      const state = getState();
+      const active = state.tuiMode === "fullscreen" && state.clickFoldReady;
+      const hovered = active && state.hoveredFoldId === id;
+      if (
+        cachedOut &&
+        cachedWidth === width &&
+        cachedActive === active &&
+        cachedHovered === hovered &&
+        sameLines(cachedChildLines, childLines)
+      ) {
+        return cachedOut;
+      }
+      const out = childLines.map(
         (line) => spaces + withFoldMarker(line, id, inner),
       );
+      cachedWidth = width;
+      cachedActive = active;
+      cachedHovered = hovered;
+      cachedChildLines = childLines;
+      cachedOut = out;
+      return out;
     },
     invalidate() {
+      cachedOut = undefined;
+      cachedChildLines = undefined;
       component.invalidate?.();
     },
     handleMouse(event: unknown) {
@@ -120,6 +160,7 @@ export function markBodyFold(node: object, id: string): void {
 
 export function unmarkBodyFold(node: object): void {
   textInstances.delete(node);
+  textRenderCache.delete(node);
 }
 
 /** Mark Text leaves under `root` as fold rows (skip titled chrome + nested tools). */
@@ -181,6 +222,28 @@ function registerTextInstance(node: object, id: string): void {
   textInstances.set(node, id);
 }
 
+type TextFoldCacheEntry = {
+  id: string;
+  rawLines: readonly string[];
+  width: number;
+  active: boolean;
+  hovered: boolean;
+  out: string[];
+};
+
+const TEXT_CACHE_KEY = Symbol.for("pi-grok-tui.foldTextRenderCache");
+const textRenderCache: WeakMap<object, TextFoldCacheEntry> = (() => {
+  const g = globalThis as typeof globalThis & {
+    [TEXT_CACHE_KEY]?: WeakMap<object, TextFoldCacheEntry>;
+  };
+  let m = g[TEXT_CACHE_KEY];
+  if (!(m instanceof WeakMap)) {
+    m = new WeakMap<object, TextFoldCacheEntry>();
+    g[TEXT_CACHE_KEY] = m;
+  }
+  return m;
+})();
+
 /** Patch pi Text rendering: marked instances paint fold markers on output rows. */
 export function installFoldBodyTextPatch(): () => void {
   const proto = Text.prototype as unknown as {
@@ -191,8 +254,34 @@ export function installFoldBodyTextPatch(): () => void {
   proto.render = function (this: object, width: number): string[] {
     const lines = original.call(this, width);
     const id = textInstances.get(this);
-    if (!id) return lines;
-    return lines.map((l) => withFoldMarker(l, id, width));
+    if (!id) {
+      textRenderCache.delete(this);
+      return lines;
+    }
+    const state = getState();
+    const active = state.tuiMode === "fullscreen" && state.clickFoldReady;
+    const hovered = active && state.hoveredFoldId === id;
+    const hit = textRenderCache.get(this);
+    if (
+      hit &&
+      hit.id === id &&
+      hit.width === width &&
+      hit.active === active &&
+      hit.hovered === hovered &&
+      sameLines(hit.rawLines, lines)
+    ) {
+      return hit.out;
+    }
+    const out = lines.map((l) => withFoldMarker(l, id, width));
+    textRenderCache.set(this, {
+      id,
+      rawLines: lines,
+      width,
+      active,
+      hovered,
+      out,
+    });
+    return out;
   };
   return () => {
     proto.render = original;

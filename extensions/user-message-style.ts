@@ -82,6 +82,10 @@ export function createUserMessagePrototypePatch(
   const generation = nextGeneration();
   const originalRebuild = prototype.rebuild;
   const originalRender = prototype.render;
+  const rowCache = new WeakMap<
+    UserMessageProto,
+    { raw: readonly string[]; marked: string[] }
+  >();
 
   // Mark the actual component boundary, not the ❯ glyph or generic OSC 133.
   // This also works for message components created before /reload — and now
@@ -99,10 +103,22 @@ export function createUserMessagePrototypePatch(
         /* keep whatever children the failed rebuild left behind */
       }
     }
-    return markRows(originalRender.call(this, width));
+    const raw = originalRender.call(this, width);
+    const cached = rowCache.get(this);
+    if (
+      cached &&
+      cached.raw.length === raw.length &&
+      cached.raw.every((line, i) => line === raw[i])
+    ) {
+      return cached.marked;
+    }
+    const marked = markRows(raw);
+    rowCache.set(this, { raw, marked });
+    return marked;
   };
 
   prototype.rebuild = function (this: UserMessageProto) {
+    rowCache.delete(this);
     markStyledGeneration(this, generation);
     try {
       this.clear();

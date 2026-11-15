@@ -75,6 +75,14 @@ function styleStrip(text: string, width: number, hovered: boolean): string {
   return ansiBgHex(hovered ? HOVER_BG_HEX : USER_MESSAGE_BG, body + pad);
 }
 
+type CachedStrip = {
+  rawPreview: string;
+  width: number;
+  hovered: boolean;
+  prefix: string;
+};
+const stripPrefixCache = new WeakMap<AltScreenHost, CachedStrip>();
+
 function paintPromptJump(
   host: AltScreenHost,
   screen: string[],
@@ -110,10 +118,31 @@ function paintPromptJump(
     const scrollbar = (scrollView as ScrollViewLike).isScrollbarVisible ? 1 : 0;
     const width = Math.min(rect.width - scrollbar, clip.width);
     if (width < 4) return;
-    // /reload can retain user components built with native (arrowless) bodies.
-    const preview = target.preview.startsWith("❯") ? target.preview : `❯ ${target.preview}`;
-    const text = formatStrip(preview, width);
-    if (!text) return;
+    const hovered = state.hoveredFoldId === STRIP_ID;
+    const cached = stripPrefixCache.get(host);
+    let prefix: string;
+    if (
+      cached &&
+      cached.rawPreview === target.preview &&
+      cached.width === width &&
+      cached.hovered === hovered
+    ) {
+      prefix = cached.prefix;
+    } else {
+      // /reload can retain user components built with native (arrowless) bodies.
+      const preview = target.preview.startsWith("❯") ? target.preview : `❯ ${target.preview}`;
+      const text = formatStrip(preview, width);
+      if (!text) return;
+      prefix =
+        withFoldMarker(styleStrip(text, width, hovered), STRIP_ID, width) +
+        "\x1b[0m\x1b]8;;\x07";
+      stripPrefixCache.set(host, {
+        rawPreview: target.preview,
+        width,
+        hovered,
+        prefix,
+      });
+    }
 
     registerFoldHandler(STRIP_ID, () => {
       try {
@@ -125,13 +154,14 @@ function paintPromptJump(
         /* ignore */
       }
     });
-    const hovered = state.hoveredFoldId === STRIP_ID;
     // Keep the scrollbar cell. compositeTuiLine adds an OSC 8 close BEFORE
     // the strip, which would immediately cancel click-fold's press-only link.
     // Put the segment reset AFTER the strip instead, bounding its hit area.
-    const suffix = sliceByColumn(screen[row] ?? "", width, Math.max(0, rect.width - width), true);
-    screen[row] = withFoldMarker(styleStrip(text, width, hovered), STRIP_ID, width)
-      + "\x1b[0m\x1b]8;;\x07" + suffix;
+    const suffix =
+      rect.width > width
+        ? sliceByColumn(screen[row] ?? "", width, rect.width - width, true)
+        : "";
+    screen[row] = prefix + suffix;
     return { row, width };
   } catch {
     /* never throw out of render */
