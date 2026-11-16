@@ -7,10 +7,21 @@ import {
   PI_CODING_AGENT,
   INTERNAL_MODULES,
 } from "./internal-import.js";
-import { getPreviousSibling, shouldGapAfter } from "./parent-stamp.js";
+import {
+  getPreviousSibling,
+  getWorkRollupHooks,
+  shouldGapAfter,
+  shouldGapBefore,
+} from "./parent-stamp.js";
 import { RESPONSE_LEFT_PAD, safeFg } from "./chrome.js";
 import { ThinkingScrollComponent, type ThinkingThemeLike } from "./thinking-render.js";
 import { markdownTransformFor, type MarkdownTransformSource } from "./markdown-transform.ts";
+
+const AMC_PATCHED_GEN = Symbol.for("pi-grok-tui.amcPatchGen");
+let amcGeneration = 0;
+
+const EMPTY_LINES: readonly string[] = Object.freeze([]);
+const ONE_BLANK_LINE: readonly string[] = Object.freeze([""]);
 
 interface ContentBlock {
   type: string;
@@ -31,6 +42,7 @@ interface AssistantMessage {
 
 interface AssistantMessageComponentProto extends MarkdownTransformSource {
   updateContent(message: AssistantMessage, isStreaming?: boolean): void;
+  render?(width: number): string[];
   outputPad?: number;
   setHideThinkingBlock(hide: boolean): void;
   setHiddenThinkingLabel(label: string): void;
@@ -39,10 +51,70 @@ interface AssistantMessageComponentProto extends MarkdownTransformSource {
     addChild(component: unknown): void;
   };
   lastMessage?: AssistantMessage;
+  isStreaming?: boolean;
   hideThinkingBlock: boolean;
   markdownTheme: unknown;
   hiddenThinkingLabel: string;
   hasToolCalls: boolean;
+  [AMC_PATCHED_GEN]?: number;
+}
+
+function createDynamicLeadGap(
+  owner: AssistantMessageComponentProto,
+  opts: { hasText: boolean; startsWithText: boolean },
+): { render(width: number): string[]; invalidate(): void } {
+  return {
+    render(_width: number): string[] {
+      const hooks = getWorkRollupHooks();
+      if (hooks?.isProseRollupCollapsed(owner)) {
+        return ONE_BLANK_LINE as string[];
+      }
+      if (hooks?.hasOpenRollupHeaderAbove(owner)) {
+        return EMPTY_LINES as string[];
+      }
+      const prev = getPreviousSibling(owner);
+      if (shouldGapBefore(owner)) {
+        return ONE_BLANK_LINE as string[];
+      }
+      if (opts.hasText && prev == null) {
+        return ONE_BLANK_LINE as string[];
+      }
+      if (opts.hasText && opts.startsWithText) {
+        return ONE_BLANK_LINE as string[];
+      }
+      return EMPTY_LINES as string[];
+    },
+    invalidate() {},
+  };
+}
+
+function createCollapsibleLeadingThinking(
+  owner: AssistantMessageComponentProto,
+  thinkingComp: ThinkingScrollComponent,
+): { render(width: number): string[]; invalidate(): void } {
+  let cachedThinkingRef: readonly string[] | undefined;
+  let cachedWithGap: string[] | undefined;
+
+  return {
+    render(width: number): string[] {
+      const hooks = getWorkRollupHooks();
+      if (hooks?.isProseRollupCollapsed(owner)) {
+        return EMPTY_LINES as string[];
+      }
+      const tLines = thinkingComp.render(width);
+      if (cachedWithGap && cachedThinkingRef === tLines) {
+        return cachedWithGap;
+      }
+      cachedThinkingRef = tLines;
+      cachedWithGap = [...tLines, ""];
+      return cachedWithGap;
+    },
+    invalidate() {
+      cachedThinkingRef = undefined;
+      cachedWithGap = undefined;
+      thinkingComp.invalidate();
+    },
+  };
 }
 
 export async function installThinkingPatch(): Promise<() => void> {
@@ -69,7 +141,9 @@ export async function installThinkingPatch(): Promise<() => void> {
     throw new Error("pi-grok-tui: updateContent not found");
   }
 
+  const generation = ++amcGeneration;
   const originalUpdateContent = prototype.updateContent;
+  const originalRender = prototype.render;
   const originalSetHideThinkingBlock = prototype.setHideThinkingBlock;
   const originalSetHiddenThinkingLabel = prototype.setHiddenThinkingLabel;
 
@@ -90,6 +164,7 @@ export async function installThinkingPatch(): Promise<() => void> {
     message: AssistantMessage,
     isStreaming = this.isStreaming ?? false,
   ) {
+    this[AMC_PATCHED_GEN] = generation;
     this.lastMessage = message;
     this.isStreaming = isStreaming;
 
@@ -117,30 +192,19 @@ export async function installThinkingPatch(): Promise<() => void> {
       const hasToolCalls = message.content.some((c) => c.type === "toolCall");
       this.hasToolCalls = hasToolCalls;
 
-      // Spacing (Grok-like):
-      // - one blank after user prompt (or previous prose) before this message
-      // - chrome rows stack tightly; one blank between chrome and prose body
-      // Note: first updateContent may run before addChild (parent unset). Parent
-      // stamp re-invokes updateContent after addChild so the gap is applied.
-      const prev = getPreviousSibling(this);
-      const needsLeadGap = shouldGapAfter(prev);
-      if (needsLeadGap) {
-        this.contentContainer.addChild(new Spacer(1));
-      } else if (hasText && prev == null) {
-        // Parent not stamped yet — conservative gap so user→first chrome
-        // never sticks. Tight tool→thought is fixed on the re-layout pass.
-        this.contentContainer.addChild(new Spacer(1));
-      } else if (hasText) {
-        // Message starts with body text (no thinking first) after chrome tools:
-        // still separate prose from the previous tool chrome.
-        const firstMeaningful = message.content.find(
-          (c) =>
-            (c.type === "text" && (c.text || "").trim().length > 0) ||
-            (c.type === "thinking" && !c.redacted && (c.thinking || "").trim().length > 0),
+      const firstMeaningful = message.content.find(
+        (c) =>
+          (c.type === "text" && (c.text || "").trim().length > 0) ||
+          (c.type === "thinking" && !c.redacted && (c.thinking || "").trim().length > 0),
+      );
+      const startsWithText = firstMeaningful?.type === "text";
+
+      // Dynamic lead gap adapts without re-running updateContent when a
+      // pre-prose work rollup collapses, opens, or dissolves (Ctrl+O / Alt+T).
+      if (hasThinking || hasText) {
+        this.contentContainer.addChild(
+          createDynamicLeadGap(this, { hasText, startsWithText }),
         );
-        if (firstMeaningful?.type === "text") {
-          this.contentContainer.addChild(new Spacer(1));
-        }
       }
 
       let renderedThinking = false;
@@ -167,16 +231,12 @@ export async function installThinkingPatch(): Promise<() => void> {
 
       for (const block of message.content) {
         if (block.type === "text" && (block.text || "").trim().length > 0) {
-          // Blank line before body when it follows thinking in this message
-          // (hasTextAfterThinking path adds spacer after thinking instead).
           const text = (block.text || "").trim();
           const slot = previousSlots[slots.length];
           const component = slot?.kind === "text" ? slot.component : new Markdown(
             text, padX, 0, this.markdownTheme as any, undefined,
             { transform: markdownTransformFor(this, "assistant") },
           );
-          // setText retains Pi 1.5's rendered-block/highlight cache, but clears
-          // final lines so a stream-end/context-only transition is transformed.
           component.setText(text);
           slots.push({ kind: "text", component });
           this.contentContainer.addChild(component);
@@ -195,18 +255,24 @@ export async function installThinkingPatch(): Promise<() => void> {
           );
           component.setThinkingBlocks(blocks);
           slots.push({ kind: "thinking", component });
-          this.contentContainer.addChild(component);
           renderedThinking = true;
-          if (hasTextAfterThinking) {
-            // chrome → prose gap
-            this.contentContainer.addChild(new Spacer(1));
+
+          if (!hasTextBeforeThinking && hasTextAfterThinking) {
+            // Leading thinking right above prose in the same message can be
+            // absorbed into the collapsed pre-prose work rollup above.
+            this.contentContainer.addChild(
+              createCollapsibleLeadingThinking(this, component),
+            );
+          } else {
+            this.contentContainer.addChild(component);
+            if (hasTextAfterThinking) {
+              this.contentContainer.addChild(new Spacer(1));
+            }
           }
         }
       }
 
       // Surface hard failures only when there's no tool row to own the error.
-      // Keep to a single line so resume rebuild never paints a multi-line red wall.
-      // Skip when we already show Thought chrome (abort-during-think is common).
       if (!hasToolCalls && !hasThinking) {
         if (message.stopReason === "aborted") {
           const raw =
@@ -242,7 +308,6 @@ export async function installThinkingPatch(): Promise<() => void> {
 
       this.hideThinkingBlock = false;
     } catch {
-      // Prefer empty chrome over native full-thinking + red error walls.
       try {
         this.contentContainer.clear();
       } catch {
@@ -262,8 +327,25 @@ export async function installThinkingPatch(): Promise<() => void> {
   prototype.setHideThinkingBlock = patchedSetHideThinkingBlock as any;
   prototype.setHiddenThinkingLabel = patchedSetHideThinkingBlock as any;
 
+  if (typeof originalRender === "function") {
+    prototype.render = function (this: AssistantMessageComponentProto, width: number): string[] {
+      if (this[AMC_PATCHED_GEN] !== generation && this.lastMessage) {
+        this[AMC_PATCHED_GEN] = generation;
+        try {
+          this.updateContent(this.lastMessage, this.isStreaming ?? false);
+        } catch {
+          /* never break render */
+        }
+      }
+      return originalRender.call(this, width);
+    };
+  }
+
   return () => {
     prototype.updateContent = originalUpdateContent;
+    if (typeof originalRender === "function") {
+      prototype.render = originalRender;
+    }
     prototype.setHideThinkingBlock = originalSetHideThinkingBlock;
     prototype.setHiddenThinkingLabel = originalSetHiddenThinkingLabel;
   };

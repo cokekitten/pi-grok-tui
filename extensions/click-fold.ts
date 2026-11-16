@@ -141,10 +141,15 @@ export function injectFoldRow(
   const id = parseFoldMarker(row);
   if (!id) return undefined;
   const saved = row;
-  // pi appends SEGMENT_RESET (`ESC[0m` + OSC 8 close) to every previousScreen
-  // row. Strip it so the injected hyperlink stays open across the visible cells.
-  const core = row.replace(/\x1b\[0m\x1b\]8;;(?:\x07|\x1b\\)$/, "");
-  rows[idx] = hyperlink(core, foldUrl(id));
+  // pi's ScrollView / compositeTuiLine emits SEGMENT_RESET (`ESC[0m` + bare
+  // OSC 8 close) at column 0, before the scrollbar, and at end-of-line. Re-open
+  // the fold URL on every bare OSC 8 close so the fold hit target spans the
+  // whole row while preserving any explicit inline OSC 8 URLs.
+  const url = foldUrl(id);
+  const core = row
+    .replace(/\x1b\[0m\x1b\]8;;(?:\x07|\x1b\\)$/, "")
+    .replace(/\x1b\]8;;(?:\x07|\x1b\\)/g, `\x1b]8;;${url}\x07`);
+  rows[idx] = hyperlink(core, url);
   return () => {
     rows[idx] = saved;
   };
@@ -178,6 +183,7 @@ export function renderClickableChrome(
     kind: ChromeKind;
     label: string;
     failedSuffix?: string;
+    metaSuffix?: string;
     hintKind: "thinking" | "tool";
     id?: string;
     onClick?: () => void;
@@ -192,6 +198,7 @@ export function renderClickableChrome(
     kind: opts.kind,
     label: opts.label,
     failedSuffix: opts.failedSuffix,
+    metaSuffix: opts.metaSuffix,
     hint,
   });
   const truncated = truncateToWidth(styled, Math.max(1, width), "");

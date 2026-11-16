@@ -29,6 +29,16 @@ export interface ThinkingScrollState {
   viewOverrides: WeakMap<object, ToolViewMode>;
   /** Headers of verb groups the user expanded by click. */
   expandedGroupHeaders: WeakSet<object>;
+  /** Prose assistant components whose pre-prose work rollup was expanded. */
+  expandedWorkRollups: WeakSet<object>;
+  /** Prose/closer components whose work rollup initial state was seeded. */
+  initializedWorkRollups: WeakSet<object>;
+  /** Live completion timestamps (ms) for assistant thinking phases, keyed by msg timestamp. */
+  thinkingEndByTimestamp: Map<number, number>;
+  /** Live completion timestamps (ms) for assistant messages, keyed by msg timestamp. */
+  messageEndByTimestamp: Map<number, number>;
+  /** True while installWorkRollupPatch is active. */
+  workRollupInstalled?: boolean;
   patchRefCount: number;
   patchCleanup?: (() => void) | undefined;
   patchInstallPromise?: Promise<() => void> | undefined;
@@ -36,6 +46,10 @@ export interface ThinkingScrollState {
 }
 
 const STATE_KEY = Symbol.for("pi-grok-tui.state");
+export const MIN_EPOCH_MS = 1_000_000_000_000;
+export const TOOL_STARTED_AT_KEY = Symbol.for("pi-grok-tui.toolStartedAt");
+export const TOOL_FINISHED_AT_KEY = Symbol.for("pi-grok-tui.toolFinishedAt");
+const MAX_TIMING_ENTRIES = 1024;
 
 const MODE_ORDER: ToolViewMode[] = ["chrome", "truncated", "full"];
 
@@ -54,6 +68,18 @@ function ensureClickFoldState(state: ThinkingScrollState): ThinkingScrollState {
   }
   if (!(state.expandedGroupHeaders instanceof WeakSet)) {
     state.expandedGroupHeaders = new WeakSet();
+  }
+  if (!(state.expandedWorkRollups instanceof WeakSet)) {
+    state.expandedWorkRollups = new WeakSet();
+  }
+  if (!(state.initializedWorkRollups instanceof WeakSet)) {
+    state.initializedWorkRollups = new WeakSet();
+  }
+  if (!(state.thinkingEndByTimestamp instanceof Map)) {
+    state.thinkingEndByTimestamp = new Map();
+  }
+  if (!(state.messageEndByTimestamp instanceof Map)) {
+    state.messageEndByTimestamp = new Map();
   }
   if (typeof state.hoveredFoldId !== "string") {
     state.hoveredFoldId = undefined;
@@ -82,6 +108,11 @@ export function getState(): ThinkingScrollState {
     thinkingOverrides: new Map(),
     viewOverrides: new WeakMap(),
     expandedGroupHeaders: new WeakSet(),
+    expandedWorkRollups: new WeakSet(),
+    initializedWorkRollups: new WeakSet(),
+    thinkingEndByTimestamp: new Map(),
+    messageEndByTimestamp: new Map(),
+    workRollupInstalled: false,
     patchRefCount: 0,
   };
   (globalThis as any)[STATE_KEY] = created;
@@ -94,6 +125,8 @@ export function resetClickFoldSession(): void {
   state.thinkingOverrides = new Map();
   state.viewOverrides = new WeakMap();
   state.expandedGroupHeaders = new WeakSet();
+  state.expandedWorkRollups = new WeakSet();
+  state.initializedWorkRollups = new WeakSet();
   state.hoveredFoldId = undefined;
 }
 
@@ -102,6 +135,7 @@ export function clearToolFoldOverrides(): void {
   const state = getState();
   state.viewOverrides = new WeakMap();
   state.expandedGroupHeaders = new WeakSet();
+  state.expandedWorkRollups = new WeakSet();
 }
 
 export function getViewOverride(target: object): ToolViewMode | undefined {
@@ -112,6 +146,10 @@ export function setViewOverride(target: object, mode: ToolViewMode): void {
   getState().viewOverrides.set(target, mode);
 }
 
+export function clearViewOverride(target: object): void {
+  getState().viewOverrides.delete(target);
+}
+
 export function isGroupExpanded(header: object): boolean {
   return getState().expandedGroupHeaders.has(header);
 }
@@ -120,6 +158,24 @@ export function setGroupExpanded(header: object, expanded: boolean): void {
   const set = getState().expandedGroupHeaders;
   if (expanded) set.add(header);
   else set.delete(header);
+}
+
+export function isWorkRollupExpanded(proseTarget: object): boolean {
+  return getState().expandedWorkRollups.has(proseTarget);
+}
+
+export function setWorkRollupExpanded(proseTarget: object, expanded: boolean): void {
+  const set = getState().expandedWorkRollups;
+  if (expanded) set.add(proseTarget);
+  else set.delete(proseTarget);
+}
+
+export function isWorkRollupInitialized(proseTarget: object): boolean {
+  return getState().initializedWorkRollups.has(proseTarget);
+}
+
+export function markWorkRollupInitialized(proseTarget: object): void {
+  getState().initializedWorkRollups.add(proseTarget);
 }
 
 export function getToolViewMode(): ToolViewMode {
@@ -144,4 +200,21 @@ export function toolViewModeLabel(mode: ToolViewMode): string {
     case "full":
       return "full";
   }
+}
+
+function setBoundedMapEntry(map: Map<number, number>, key: number, value: number): void {
+  if (!Number.isFinite(key) || key < MIN_EPOCH_MS || !Number.isFinite(value)) return;
+  if (!map.has(key) && map.size >= MAX_TIMING_ENTRIES) {
+    const oldest = map.keys().next().value;
+    if (oldest !== undefined) map.delete(oldest);
+  }
+  map.set(key, value);
+}
+
+export function recordThinkingEnd(timestamp: number, atMs = Date.now()): void {
+  setBoundedMapEntry(getState().thinkingEndByTimestamp, timestamp, atMs);
+}
+
+export function recordMessageEnd(timestamp: number, atMs = Date.now()): void {
+  setBoundedMapEntry(getState().messageEndByTimestamp, timestamp, atMs);
 }

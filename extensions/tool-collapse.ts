@@ -4,6 +4,7 @@
  * - truncated/full: strip background blocks only; collapsible tools get a ◆ title
  *   and quieter body; edit/write keep native syntax/diff highlighting
  */
+import { truncateToWidth } from "@earendil-works/pi-tui";
 import {
   bodyFg,
   RESPONSE_LEFT_PAD,
@@ -11,30 +12,58 @@ import {
   type ChromeKind,
   type ChromeTheme,
 } from "./chrome.js";
-import { dimBodyTexts, stripBgDeep } from "./flat-style.js";
+import {
+  extractCodemodeCalls,
+  formatCodemodeTreeLines,
+  isCodemodeAutoTree,
+  isCodemodeTool,
+  resolveCodemodeDisplay,
+  summarizeCodemodeChrome,
+  type CodemodeChromeSummary,
+} from "./codemode-style.js";
+import { dimBodyTexts, stripAnsi, stripBgDeep } from "./flat-style.js";
 import {
   importInternal,
   PI_CODING_AGENT,
   INTERNAL_MODULES,
 } from "./internal-import.js";
-import { getPreviousSibling, getSiblings, shouldGapAfter } from "./parent-stamp.js";
+import {
+  getNextSibling,
+  getPreviousSibling,
+  getSiblings,
+  isNodeInUnclosedChatTurn,
+  relayoutChild,
+  shouldGapBefore,
+} from "./parent-stamp.js";
 import {
   markBodyFold,
   markBodyFoldDeep,
   unmarkBodyFold,
   unwrapMouseRegion,
+  withFoldMarker,
   wrapFoldBodyComponent,
 } from "./fold-body.js";
-import { getToolViewMode, isGroupExpanded } from "./state.js";
+import {
+  clearViewOverride,
+  getState,
+  getToolViewMode,
+  getViewOverride,
+  isGroupExpanded,
+  setGroupExpanded,
+  TOOL_FINISHED_AT_KEY,
+  TOOL_STARTED_AT_KEY,
+} from "./state.js";
 import {
   chromePadForRenderShell,
   clickableChromeChild,
+  codemodeBodyFoldId,
   collapsibleRun,
   effectiveToolMode,
   nativePreviewFoldId,
+  toggleToolAt,
   toolChromeKind,
 } from "./tool-click.js";
-import { idForTarget } from "./click-fold.js";
+import { idForTarget, registerFoldHandler } from "./click-fold.js";
 import {
   formatCollapsedToolLabel,
   formatVerbGroupLabel,
@@ -53,6 +82,7 @@ interface ToolExecutionProto {
   cwd: string;
   expanded: boolean;
   isPartial: boolean;
+  executionStarted?: boolean;
   argsPending?: boolean;
   result?: { isError?: boolean; content?: unknown; details?: unknown };
   hideComponent: boolean;
@@ -84,13 +114,23 @@ interface ToolExecutionProto {
   hasRendererDefinition(): boolean;
   getRenderShell(): "default" | "self";
   updateDisplay(): void;
+  render?(width: number): string[];
   setExpanded?(expanded: boolean): void;
   removeChild?(c: unknown): void;
   addChild?(c: unknown): void;
 }
 
 const TITLE_MARK = "__piToolTitle";
+const TOOL_PATCHED_GEN = Symbol.for("pi-grok-tui.toolPatchedGen");
+const TOOL_GEN_COUNTER = Symbol.for("pi-grok-tui.toolGenCounter");
 const passthrough = (t: string) => t;
+
+function nextToolPatchGeneration(): number {
+  const g = globalThis as Record<symbol, unknown>;
+  const next = (typeof g[TOOL_GEN_COUNTER] === "number" ? g[TOOL_GEN_COUNTER] : 0) + 1;
+  g[TOOL_GEN_COUNTER] = next;
+  return next;
+}
 
 function isToolComponent(c: unknown): c is ToolExecutionProto {
   return (
@@ -227,7 +267,7 @@ function applyLeadSpacer(self: ToolExecutionProto, roomy: boolean): void {
     // Expanded views: breathing room between every block
     lead = prev ? 1 : 0;
   } else {
-    lead = shouldGapAfter(prev) ? 1 : 0;
+    lead = shouldGapBefore(self) ? 1 : 0;
   }
   if (!Array.isArray(self.children)) return;
   for (const child of self.children) {
@@ -282,7 +322,12 @@ function prependGroupHeader(
   }
 }
 
-function wrapExpandedBody(node: unknown, id: string, pad: number): unknown {
+function wrapExpandedBody(
+  node: unknown,
+  id: string,
+  pad: number,
+  onRender?: () => void,
+): unknown {
   const inner = unwrapMouseRegion(node);
   if (!inner || typeof inner !== "object") return node;
   markBodyFoldDeep(inner, id, [TITLE_MARK]);
@@ -290,6 +335,7 @@ function wrapExpandedBody(node: unknown, id: string, pad: number): unknown {
     inner as { render(width: number): string[]; invalidate?(): void },
     id,
     pad,
+    onRender,
   );
 }
 
@@ -358,6 +404,18 @@ function setCollapsedChrome(
   } else {
     if (typeof self.contentText.setCustomBgFn === "function") {
       self.contentText.setCustomBgFn(passthrough);
+    }
+    if (typeof (self.contentText as { paddingX?: unknown }).paddingX === "number") {
+      (self.contentText as { paddingX: number }).paddingX = 0;
+    }
+    if (typeof (self.contentText as { paddingY?: unknown }).paddingY === "number") {
+      (self.contentText as { paddingY: number }).paddingY = 0;
+    }
+    if (typeof (self.contentText as { paddingX?: unknown }).paddingX === "number") {
+      (self.contentText as { paddingX: number }).paddingX = 0;
+    }
+    if (typeof (self.contentText as { paddingY?: unknown }).paddingY === "number") {
+      (self.contentText as { paddingY: number }).paddingY = 0;
     }
     const sp = responsePadString();
     try {
@@ -500,6 +558,253 @@ function restyleExpanded(
   self.hideComponent = false;
 }
 
+
+function createCodemodeTreeChild(
+  self: ToolExecutionProto,
+  theme: ThemeLike,
+  summary: CodemodeChromeSummary,
+  opts: {
+    autoCompact: boolean;
+    pad: number;
+    isError: boolean;
+    running: boolean;
+  },
+): { render(width: number): string[]; invalidate(): void } {
+  const pad = opts.pad;
+  const sp = pad > 0 ? " ".repeat(pad) : "";
+  const id = codemodeBodyFoldId(self);
+  const onClick = () => {
+    toggleToolAt(self, self.toolName);
+  };
+  registerFoldHandler(id, onClick);
+
+  let cachedWidth: number | undefined;
+  let cachedTuiMode: string | undefined;
+  let cachedClickFoldReady: boolean | undefined;
+  let cachedHovered: boolean | undefined;
+  let cachedThemeSample: string | undefined;
+  let cachedLines: string[] | undefined;
+
+  return {
+    render(width: number) {
+      registerFoldHandler(id, onClick);
+      const state = getState();
+      const hovered =
+        state.tuiMode === "fullscreen" &&
+        state.clickFoldReady &&
+        state.hoveredFoldId === id;
+      const themeSample = theme.fg("muted", "m");
+      if (
+        cachedLines &&
+        cachedWidth === width &&
+        cachedTuiMode === state.tuiMode &&
+        cachedClickFoldReady === state.clickFoldReady &&
+        cachedHovered === hovered &&
+        cachedThemeSample === themeSample
+      ) {
+        return cachedLines;
+      }
+
+      const inner = Math.max(1, width - pad);
+      const rawLines = formatCodemodeTreeLines(theme, summary.calls, {
+        autoCompact: opts.autoCompact,
+        cwd: self.cwd,
+        scriptError: summary.scriptError,
+        isError: opts.isError,
+        running: opts.running,
+      });
+      const out = rawLines.map((line) => {
+        const truncated = truncateToWidth(line, inner, "…");
+        return sp + withFoldMarker(truncated, id, inner);
+      });
+
+      cachedWidth = width;
+      cachedTuiMode = state.tuiMode;
+      cachedClickFoldReady = state.clickFoldReady;
+      cachedHovered = hovered;
+      cachedThemeSample = themeSample;
+      cachedLines = out;
+      return out;
+    },
+    invalidate() {
+      cachedLines = undefined;
+      cachedWidth = undefined;
+      cachedThemeSample = undefined;
+    },
+  };
+}
+
+function setCodemodeCallsView(
+  self: ToolExecutionProto,
+  theme: ThemeLike,
+  summary: CodemodeChromeSummary,
+  opts: { autoCompact: boolean; isError: boolean; running: boolean },
+): void {
+  applyLeadSpacer(self, false);
+  const titleChild = chromeChild(self, theme, {
+    kind: summary.kind,
+    label: summary.label,
+    failedSuffix: summary.failedSuffix,
+  });
+
+  if (self.hasRendererDefinition()) {
+    const shell = self.getRenderShell();
+    const renderContainer =
+      shell === "self" ? self.selfRenderContainer : self.contentBox;
+    applyHorizontalPad(renderContainer as { paddingX?: number; paddingY?: number });
+    if (typeof renderContainer.setBgFn === "function") {
+      renderContainer.setBgFn(passthrough);
+    }
+    const pad = chromePadForRenderShell(shell);
+    const treeChild = createCodemodeTreeChild(self, theme, summary, {
+      autoCompact: opts.autoCompact,
+      pad,
+      isError: opts.isError,
+      running: opts.running,
+    });
+    renderContainer.clear();
+    renderContainer.addChild(titleChild as any);
+    renderContainer.addChild(treeChild as any);
+    self.hideComponent = false;
+  } else {
+    if (typeof self.contentText.setCustomBgFn === "function") {
+      self.contentText.setCustomBgFn(passthrough);
+    }
+    if (typeof (self.contentText as { paddingX?: unknown }).paddingX === "number") {
+      (self.contentText as { paddingX: number }).paddingX = 0;
+    }
+    if (typeof (self.contentText as { paddingY?: unknown }).paddingY === "number") {
+      (self.contentText as { paddingY: number }).paddingY = 0;
+    }
+    const sp = responsePadString();
+    try {
+      const head = titleChild.render(80)[0] ?? `◆ ${summary.label}`;
+      const headPadded = head.startsWith(sp) ? head : sp + head;
+      const treeLines = formatCodemodeTreeLines(theme, summary.calls, {
+        autoCompact: opts.autoCompact,
+        cwd: self.cwd,
+        scriptError: summary.scriptError,
+        isError: opts.isError,
+        running: opts.running,
+      }).map((l) => sp + l);
+      self.contentText.setText([headPadded, ...treeLines].join("\n"));
+    } catch {
+      self.contentText.setText(sp + `◆ ${summary.label}`);
+    }
+    const bodyId = codemodeBodyFoldId(self);
+    registerFoldHandler(bodyId, () => {
+      toggleToolAt(self, self.toolName);
+    });
+    markBodyFold(self.contentText, bodyId);
+    self.hideComponent = false;
+  }
+}
+
+function dropDuplicateCodemodeHeading(callComp: unknown): void {
+  if (!callComp || typeof callComp !== "object") return;
+  const kids = (callComp as { children?: unknown[] }).children;
+  if (!Array.isArray(kids) || kids.length === 0) return;
+  const first = kids[0] as { text?: unknown } | undefined;
+  if (first && typeof first.text === "string") {
+    if (stripAnsi(first.text).trim() === "codemode") {
+      kids.shift();
+    }
+  }
+}
+
+function restyleCodemodeFull(
+  self: ToolExecutionProto,
+  theme: ThemeLike,
+  summary: CodemodeChromeSummary,
+): void {
+  applyLeadSpacer(self, true);
+  stripBgDeep(self);
+
+  const titleChild = chromeChild(self, theme, {
+    kind: summary.kind,
+    label: summary.label,
+    failedSuffix: summary.failedSuffix,
+  });
+
+  if (self.hasRendererDefinition()) {
+    const shell = self.getRenderShell();
+    const rc =
+      shell === "self" ? self.selfRenderContainer : self.contentBox;
+    stripBgDeep(rc);
+    applyHorizontalPad(rc as { paddingX?: number; paddingY?: number });
+    stripBgDeep(self.callRendererComponent);
+    stripBgDeep(self.resultRendererComponent);
+    dropDuplicateCodemodeHeading(self.callRendererComponent);
+
+    const kids = (rc as { children?: unknown[] }).children;
+    const foldPad = shell === "self" ? RESPONSE_LEFT_PAD : 0;
+    if (Array.isArray(kids)) {
+      while (
+        kids.length > 0 &&
+        (kids[0] as Record<string, unknown>)?.[TITLE_MARK]
+      ) {
+        kids.shift();
+      }
+      // Drop empty callRenderer wrapper if stripping the heading left 0 children
+      for (let i = kids.length - 1; i >= 0; i--) {
+        const unwrapped = unwrapMouseRegion(kids[i]) as { children?: unknown[] } | undefined;
+        if (
+          unwrapped &&
+          unwrapped === self.callRendererComponent &&
+          Array.isArray(unwrapped.children) &&
+          unwrapped.children.length === 0
+        ) {
+          kids.splice(i, 1);
+        }
+      }
+
+      const title = titleChild as any;
+      (title as any)[TITLE_MARK] = true;
+      kids.unshift(title);
+
+      const bodyId = codemodeBodyFoldId(self);
+      const onBodyClick = () => {
+        toggleToolAt(self, self.toolName);
+      };
+      const keepBodyHandler = () => {
+        registerFoldHandler(bodyId, onBodyClick);
+      };
+      keepBodyHandler();
+      for (let i = 1; i < kids.length; i++) {
+        // Keep CodeHighlighter syntax colors and ✓/✗/error fg intact (no dimBodyTexts).
+        kids[i] = wrapExpandedBody(kids[i], bodyId, foldPad, keepBodyHandler);
+      }
+    }
+  } else {
+    if (typeof self.contentText.setCustomBgFn === "function") {
+      self.contentText.setCustomBgFn(passthrough);
+    }
+    const sp = responsePadString();
+    const bodyId = codemodeBodyFoldId(self);
+    registerFoldHandler(bodyId, () => {
+      toggleToolAt(self, self.toolName);
+    });
+    try {
+      const body = self.contentText.text ?? "";
+      const bodyLines = body
+        ? body
+            .split("\n")
+            .map((l) => (l.startsWith(sp) ? l : sp + l))
+            .join("\n")
+        : "";
+      const titleLine = titleChild.render(80)[0] ?? `◆ ${summary.label}`;
+      self.contentText.setText(
+        `${titleLine.startsWith(sp) ? titleLine : sp + titleLine}${bodyLines ? `\n${bodyLines}` : ""}`,
+      );
+      markBodyFold(self.contentText, bodyId);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  self.hideComponent = false;
+}
+
 function refreshSiblings(
   self: ToolExecutionProto,
   members: ToolExecutionProto[],
@@ -546,10 +851,24 @@ export async function installToolCollapsePatch(): Promise<() => void> {
     throw new Error("pi-grok-tui: ToolExecutionComponent.updateDisplay missing");
   }
 
+  const generation = nextToolPatchGeneration();
   const originalUpdateDisplay = prototype.updateDisplay;
+  const originalRender = prototype.render;
   const refreshDepth = { n: 0 };
   /** Re-entrancy guard: ToolExecution.invalidate → updateDisplay must not nest. */
   const updating = new WeakSet<object>();
+  const showsBodyState = new WeakMap<object, boolean>();
+  const wasRunningTool = new WeakMap<object, boolean>();
+  const lastCodemodeAutoTree = new WeakMap<object, boolean>();
+  const wasStandaloneInParent = new WeakSet<object>();
+  const syncNextSiblingOnBodyChange = (self: ToolExecutionProto, showsBody: boolean) => {
+    const prev = showsBodyState.get(self);
+    showsBodyState.set(self, showsBody);
+    if (prev !== undefined && prev !== showsBody) {
+      const next = getNextSibling(self);
+      if (next) relayoutChild(next);
+    }
+  };
 
   const originalSetExpanded = prototype.setExpanded as
     | ((this: ToolExecutionProto, expanded: boolean) => void)
@@ -566,20 +885,98 @@ export async function installToolCollapsePatch(): Promise<() => void> {
   }
 
   const patchedUpdateDisplay = function (this: ToolExecutionProto) {
+    (this as unknown as Record<symbol, unknown>)[TOOL_PATCHED_GEN] = generation;
     if (updating.has(this)) return;
     updating.add(this);
     // Pi 1.5 defers streamed args until render(). Chrome/group branches skip
     // native updateDisplay, so they must acknowledge the batch themselves.
     this.argsPending = false;
     try {
+      const toolRunningNow = isToolRunning(this);
+      const prevToolRunning = wasRunningTool.get(this);
+      wasRunningTool.set(this, toolRunningNow);
+      if (this.executionStarted) {
+        if (toolRunningNow) {
+          const rec = this as unknown as Record<symbol, unknown>;
+          if (typeof rec[TOOL_STARTED_AT_KEY] !== "number") {
+            rec[TOOL_STARTED_AT_KEY] = Date.now();
+          }
+        } else if (prevToolRunning === true) {
+          (this as unknown as Record<symbol, unknown>)[TOOL_FINISHED_AT_KEY] = Date.now();
+        }
+      }
+
+      if (isCodemodeTool(this.toolName)) {
+        const running = toolRunningNow;
+        const inUnclosedTurn = isNodeInUnclosedChatTurn(this);
+        const isError = !running && this.result?.isError === true;
+        const summary = summarizeCodemodeChrome(this.args, this.result, {
+          running,
+          inUnclosedTurn,
+          cwd: this.cwd,
+        });
+        const prevAutoTree = lastCodemodeAutoTree.get(this);
+        lastCodemodeAutoTree.set(this, summary.autoTree);
+        if (prevAutoTree === true && !summary.autoTree) {
+          clearViewOverride(this);
+        }
+        const { level, autoCompact } = resolveCodemodeDisplay({
+          globalMode: getToolViewMode(),
+          override: getViewOverride(this),
+          autoTree: summary.autoTree,
+        });
+
+        if (level === "collapsed") {
+          this.expanded = false;
+          clearImages(this);
+          setCollapsedChrome(this, theme, {
+            kind: summary.kind,
+            label: summary.label,
+            failedSuffix: summary.failedSuffix,
+          });
+          syncNextSiblingOnBodyChange(this, false);
+          return;
+        }
+
+        if (level === "calls") {
+          this.expanded = false;
+          clearImages(this);
+          setCodemodeCallsView(this, theme, summary, {
+            autoCompact,
+            isError,
+            running,
+          });
+          syncNextSiblingOnBodyChange(this, false);
+          return;
+        }
+
+        // level === "full"
+        this.expanded = true;
+        this.hideComponent = false;
+        originalUpdateDisplay.call(this);
+        restyleCodemodeFull(this, theme, summary);
+        syncNextSiblingOnBodyChange(this, true);
+        return;
+      }
+
       const { members, header, isHeader } = consecutiveGroup(this);
       const grouped = members.length >= 2 && getToolViewMode() === "chrome";
+      if (!grouped && getToolViewMode() === "chrome" && getSiblings(this) !== null) {
+        wasStandaloneInParent.add(this);
+      } else if (grouped && wasStandaloneInParent.has(header)) {
+        wasStandaloneInParent.delete(header);
+        const headerOverride = getViewOverride(header);
+        if (headerOverride && headerOverride !== "chrome") {
+          setGroupExpanded(header, true);
+        }
+      }
       const groupOpen = grouped && isGroupExpanded(header);
       const titleOnly = isTitleOnlyCandidate(this);
 
       // Collapsed group: header is always the one-line group chrome, even if
       // member 0 has a local body override. Other members stay hidden.
       if (grouped && !groupOpen) {
+        this.expanded = false;
         if (!isHeader) {
           this.hideComponent = true;
           if (Array.isArray(this.children)) {
@@ -590,6 +987,7 @@ export async function installToolCollapsePatch(): Promise<() => void> {
               }
             }
           }
+          syncNextSiblingOnBodyChange(this, false);
           refreshSiblings(this, members, refreshDepth);
           return;
         }
@@ -612,6 +1010,7 @@ export async function installToolCollapsePatch(): Promise<() => void> {
           groupHeader: true,
           header,
         });
+        syncNextSiblingOnBodyChange(this, false);
         refreshSiblings(this, members, refreshDepth);
         return;
       }
@@ -649,11 +1048,13 @@ export async function installToolCollapsePatch(): Promise<() => void> {
         if (paintGroupHeader && groupOpen) {
           prependGroupHeader(this, theme, header, groupChrome());
         }
+        syncNextSiblingOnBodyChange(this, true);
         refreshSiblings(this, members, refreshDepth);
         return;
       }
 
       // ── chrome mode: one-line titles (expanded groups already handled above)
+      this.expanded = false;
       clearImages(this);
 
       const label = formatCollapsedToolLabel(this.toolName, this.args, {
@@ -673,6 +1074,7 @@ export async function installToolCollapsePatch(): Promise<() => void> {
       } else {
         setCollapsedChrome(this, theme, { kind, label });
       }
+      syncNextSiblingOnBodyChange(this, false);
       refreshSiblings(this, members, refreshDepth);
     } catch {
       try {
@@ -694,9 +1096,42 @@ export async function installToolCollapsePatch(): Promise<() => void> {
   };
 
   prototype.updateDisplay = patchedUpdateDisplay as any;
+  if (typeof originalRender === "function") {
+    prototype.render = function (this: ToolExecutionProto, width: number): string[] {
+      if ((this as unknown as Record<symbol, unknown>)[TOOL_PATCHED_GEN] !== generation) {
+        (this as unknown as Record<symbol, unknown>)[TOOL_PATCHED_GEN] = generation;
+        try {
+          this.updateDisplay();
+        } catch {
+          /* never break render */
+        }
+      } else if (isCodemodeTool(this.toolName)) {
+        const running = isToolRunning(this);
+        const wantAutoTree = isCodemodeAutoTree(
+          extractCodemodeCalls(this.result?.details),
+          {
+            running,
+            inUnclosedTurn: isNodeInUnclosedChatTurn(this),
+            isError: !running && this.result?.isError === true,
+          },
+        );
+        if (lastCodemodeAutoTree.get(this) !== wantAutoTree) {
+          try {
+            this.updateDisplay();
+          } catch {
+            /* never break render */
+          }
+        }
+      }
+      return originalRender.call(this, width);
+    };
+  }
 
   return () => {
     prototype.updateDisplay = originalUpdateDisplay;
+    if (typeof originalRender === "function") {
+      prototype.render = originalRender;
+    }
     if (typeof originalSetExpanded === "function") {
       prototype.setExpanded = originalSetExpanded;
     }

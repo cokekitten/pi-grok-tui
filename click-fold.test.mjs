@@ -169,6 +169,17 @@ describe("injectFoldRow", () => {
     assert.equal(rows[1], painted + "\x1b[0m\x1b]8;;\x07");
   });
 
+  it("keeps fold link open across Pi 1.5 ScrollView leading and scrollbar SEGMENT_RESETs", () => {
+    const raw = "\x1b[0m\x1b]8;;\x07  " + foldMarker("f12:r") + "◇ Thought · Read 2 files   \x1b[0m\x1b]8;;\x07┃\x1b[0m\x1b]8;;\x07";
+    const rows = [raw];
+    const restore = injectFoldRow(rows, 0);
+    assert.ok(restore);
+    assert.equal(getOsc8LinkAtColumn(rows[0], 0), "pi-grok-tui://v1/fold/f12:r");
+    assert.equal(getOsc8LinkAtColumn(rows[0], 6), "pi-grok-tui://v1/fold/f12:r");
+    restore();
+    assert.equal(rows[0], raw);
+  });
+
   it("no-ops without a registered row, out-of-bounds y, or non-string rows", () => {
     assert.equal(injectFoldRow(["x", "y"], 0), undefined);
     assert.equal(injectFoldRow(undefined, 0), undefined);

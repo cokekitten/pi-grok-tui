@@ -168,11 +168,21 @@ export async function installToolViewCyclePatch(): Promise<() => void> {
     }
   };
 
-  // Absolute set from elsewhere: true → full, false → chrome
+  // Absolute set from elsewhere (e.g. pi-subagents calling setToolsExpanded(false)
+  // on every subagent execution): match native Pi's no-op guard when global
+  // expansion already matches `expanded`, preserving per-row click overrides and
+  // avoiding a full-chat relayout/repaint storm.
   proto.setToolsExpanded = function (
     this: InteractiveModeLike,
     expanded: boolean,
   ) {
+    const currentMode = getToolViewMode();
+    if (!expanded && currentMode !== "full" && !this.toolOutputExpanded) {
+      return;
+    }
+    if (expanded && currentMode === "full" && Boolean(this.toolOutputExpanded)) {
+      return;
+    }
     clearToolFoldOverrides();
     const stateMode: ToolViewMode = expanded ? "full" : "chrome";
     getState().toolViewMode = stateMode;

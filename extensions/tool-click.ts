@@ -2,13 +2,25 @@
  * Per-tool / group click fold helpers.
  */
 import { RESPONSE_LEFT_PAD, type ChromeKind, type ChromeTheme } from "./chrome.ts";
-import { groupRunRange, nextToolFoldMode, type GroupSibling } from "./click-fold-core.ts";
+import {
+  groupRunRange,
+  isGroupableTool,
+  nextToolFoldMode,
+  type GroupSibling,
+} from "./click-fold-core.ts";
+import {
+  extractCodemodeCalls,
+  isCodemodeAutoTree,
+  isCodemodeTool,
+  resolveCodemodeDisplay,
+} from "./codemode-style.ts";
 import {
   groupFoldId,
   idForTarget,
   registerFoldHandler,
   renderClickableChrome,
 } from "./click-fold.ts";
+import { isNodeInUnclosedChatTurn } from "./parent-stamp.ts";
 import {
   getState,
   getToolViewMode,
@@ -39,6 +51,30 @@ export function toolChromeKind(status: {
 }
 
 export function effectiveToolMode(target: object, toolName: string): ToolViewMode {
+  if (isCodemodeTool(toolName)) {
+    const t = target as {
+      isPartial?: boolean;
+      result?: { isError?: boolean; details?: unknown };
+    };
+    const running =
+      "isPartial" in t ? Boolean(t.isPartial || t.result == null) : t.result == null;
+    const calls = extractCodemodeCalls(t.result?.details);
+    const isError = !running && t.result?.isError === true;
+    const inUnclosedTurn = isNodeInUnclosedChatTurn(target);
+    const autoTree = isCodemodeAutoTree(calls, {
+      running,
+      inUnclosedTurn,
+      isError,
+    });
+    const { level } = resolveCodemodeDisplay({
+      globalMode: getToolViewMode(),
+      override: getViewOverride(target),
+      autoTree,
+    });
+    if (level === "collapsed") return "chrome";
+    if (level === "calls") return "truncated";
+    return "full";
+  }
   if (toolName === "write") {
     const mode = getViewOverride(target) ?? getToolViewMode();
     return mode === "chrome" ? "truncated" : mode;
@@ -60,8 +96,28 @@ export function nativePreviewFoldId(
   return id;
 }
 
+function codemodeHasTreeRows(target: object): boolean {
+  const t = target as {
+    isPartial?: boolean;
+    result?: { isError?: boolean; details?: unknown };
+  };
+  const running =
+    "isPartial" in t ? Boolean(t.isPartial || t.result == null) : t.result == null;
+  if (running) return true;
+  const calls = extractCodemodeCalls(t.result?.details);
+  if (calls.length > 0) return true;
+  return t.result?.isError === true;
+}
+
+export function codemodeBodyFoldId(target: object): string {
+  return `${idForTarget(target)}:b`;
+}
+
 export function toggleToolAt(target: object, toolName: string): ToolViewMode {
-  const next = nextToolFoldMode(toolName, effectiveToolMode(target, toolName));
+  let next = nextToolFoldMode(toolName, effectiveToolMode(target, toolName));
+  if (isCodemodeTool(toolName) && next === "truncated" && !codemodeHasTreeRows(target)) {
+    next = "full";
+  }
   setViewOverride(target, next);
   const updater = target as { updateDisplay?: () => void; rebuild?: () => void };
   try {
@@ -71,6 +127,26 @@ export function toggleToolAt(target: object, toolName: string): ToolViewMode {
     /* render will pick up the override */
   }
   return next;
+}
+
+/**
+ * Title-bar click handler: for expanded codemode ("calls" or "full"), clicking
+ * the title directly collapses back to 1-line chrome; when already collapsed,
+ * clicking the title expands it. Lower region keeps the 3-state cycle via toggleToolAt.
+ */
+export function toggleToolTitleAt(target: object, toolName: string): ToolViewMode {
+  if (isCodemodeTool(toolName) && effectiveToolMode(target, toolName) !== "chrome") {
+    setViewOverride(target, "chrome");
+    const updater = target as { updateDisplay?: () => void; rebuild?: () => void };
+    try {
+      if (typeof updater.updateDisplay === "function") updater.updateDisplay();
+      else updater.rebuild?.();
+    } catch {
+      /* render will pick up the override */
+    }
+    return "chrome";
+  }
+  return toggleToolAt(target, toolName);
 }
 
 export function toggleGroupAt(header: object): boolean {
@@ -132,7 +208,7 @@ export function collapsibleRun(
   for (let i = range.start; i <= range.end; i++) {
     const c = siblings[i];
     const kind = classified[i];
-    if (kind?.kind === "tool" && isCollapsibleTool(kind.toolName)) {
+    if (kind?.kind === "tool" && isGroupableTool(kind.toolName)) {
       members.push(c as CollapsibleTool);
     }
   }
@@ -162,7 +238,7 @@ export function renderToolChromeLine(
         toggleGroupAt(opts.target);
       }
     : () => {
-        toggleToolAt(opts.target, opts.toolName);
+        toggleToolTitleAt(opts.target, opts.toolName);
       };
   return renderClickableChrome(width, theme, {
     kind: opts.kind,
@@ -195,7 +271,7 @@ export function clickableChromeChild(
         toggleGroupAt(opts.target);
       }
     : () => {
-        toggleToolAt(opts.target, opts.toolName);
+        toggleToolTitleAt(opts.target, opts.toolName);
       };
 
   let cachedWidth: number | undefined;

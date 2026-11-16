@@ -43,10 +43,20 @@ export function nextThinkingExpanded(currentlyExpanded: boolean): boolean {
   return !currentlyExpanded;
 }
 
+export function isGroupableTool(toolName: string): boolean {
+  return isCollapsibleTool(toolName) && toolName !== "codemode";
+}
+
 export function nextToolFoldMode(
   toolName: string,
   current: ToolViewMode,
 ): ToolViewMode {
+  // codemode 3-state cycle: collapsed (chrome) → calls (truncated) → full → collapsed
+  if (toolName === "codemode") {
+    if (current === "chrome") return "truncated";
+    if (current === "truncated") return "full";
+    return "chrome";
+  }
   // Native write preview (10 lines) ↔ full; never title-only chrome.
   if (toolName === "write") return current === "full" ? "truncated" : "full";
   if (!isCollapsibleTool(toolName)) return current;
@@ -66,11 +76,11 @@ export function groupRunRange(
 ): { start: number; end: number } | undefined {
   if (!groupable) return undefined;
   const self = siblings[index];
-  if (!self || self.kind !== "tool" || !isCollapsibleTool(self.toolName)) {
+  if (!self || self.kind !== "tool" || !isGroupableTool(self.toolName)) {
     return undefined;
   }
   const isMember = (c: GroupSibling | undefined) =>
-    c?.kind === "tool" && isCollapsibleTool(c.toolName);
+    c?.kind === "tool" && isGroupableTool(c.toolName);
   let start = index;
   while (start > 0) {
     const prev = siblings[start - 1];

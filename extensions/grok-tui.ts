@@ -16,7 +16,12 @@ import { installPromptJumpPatch } from "./prompt-jump.js";
 import { installClickFoldPatch, resetFoldHandlers } from "./click-fold.js";
 import { clearFoldRegistry } from "./fold-body.js";
 import { installSkillFlatPatch } from "./skill-flat.js";
-import { getState, resetClickFoldSession } from "./state.js";
+import {
+  getState,
+  recordMessageEnd,
+  recordThinkingEnd,
+  resetClickFoldSession,
+} from "./state.js";
 import { applyGlobalThinkingToggle } from "./thinking-click.js";
 import {
   isThinkingExpandInput,
@@ -26,6 +31,7 @@ import { installThinkingPatch } from "./thinking-patch.js";
 import { installToolCollapsePatch } from "./tool-collapse.js";
 import { installToolViewCyclePatch } from "./tool-view-cycle.js";
 import { installUserMessageStylePatch } from "./user-message-style.js";
+import { installWorkRollupPatch } from "./work-rollup.js";
 
 async function installPatch(): Promise<() => void> {
   // Click intercept first so chrome render sees clickFoldReady on the first paint.
@@ -48,6 +54,7 @@ async function installPatch(): Promise<() => void> {
   let cleanupCycle: (() => void) | undefined;
   let cleanupSkill: (() => void) | undefined;
   let cleanupUser: (() => void) | undefined;
+  let cleanupRollup: (() => void) | undefined;
   let cleanupJump: (() => void) | undefined;
   try {
     cleanupTools = await installToolCollapsePatch();
@@ -98,6 +105,14 @@ async function installPatch(): Promise<() => void> {
     );
   }
   try {
+    cleanupRollup = await installWorkRollupPatch();
+  } catch (error) {
+    console.warn(
+      "pi-grok-tui: work rollup patch failed:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+  try {
     cleanupJump = installPromptJumpPatch();
   } catch (error) {
     console.warn(
@@ -106,6 +121,7 @@ async function installPatch(): Promise<() => void> {
     );
   }
   return () => {
+    cleanupRollup?.();
     cleanupThinking();
     cleanupTools?.();
     cleanupCustom?.();
@@ -326,13 +342,21 @@ export default function (pi: ExtensionAPI) {
       type === "toolcall_delta" ||
       type === "toolcall_end"
     ) {
+      if (type === "thinking_end" || state.activeByTimestamp.has(ts)) {
+        recordThinkingEnd(ts);
+      }
       state.activeByTimestamp.delete(ts);
     }
   });
 
   pi.on("message_end", async (event) => {
     if (degraded || event.message.role !== "assistant") return;
-    getState().activeByTimestamp.delete(event.message.timestamp);
+    const state = getState();
+    if (state.activeByTimestamp.has(event.message.timestamp)) {
+      recordThinkingEnd(event.message.timestamp);
+    }
+    state.activeByTimestamp.delete(event.message.timestamp);
+    recordMessageEnd(event.message.timestamp);
   });
 
   pi.on("agent_end", async () => {

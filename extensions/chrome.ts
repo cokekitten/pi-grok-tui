@@ -149,6 +149,8 @@ export function formatChromeLine(
     hint?: string;
     /** e.g. " · 1 failed" rendered in error color */
     failedSuffix?: string;
+    /** e.g. " · 12.4s" rendered in dim color */
+    metaSuffix?: string;
   },
 ): string {
   try {
@@ -158,9 +160,12 @@ export function formatChromeLine(
     const failed = opts.failedSuffix
       ? safeFg(theme, "error", opts.failedSuffix)
       : "";
-    return `${glyph} ${label}${failed}${hint}`;
+    const meta = opts.metaSuffix
+      ? safeFg(theme, "dim", opts.metaSuffix)
+      : "";
+    return `${glyph} ${label}${failed}${meta}${hint}`;
   } catch {
     // Absolute last resort — plain text, never throw into resume rebuild.
-    return `◆ ${opts.label}${opts.failedSuffix ?? ""}${opts.hint ?? ""}`;
+    return `◆ ${opts.label}${opts.failedSuffix ?? ""}${opts.metaSuffix ?? ""}${opts.hint ?? ""}`;
   }
 }

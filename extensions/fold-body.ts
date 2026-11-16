@@ -52,9 +52,11 @@ function paintHoverBg(line: string, width?: number): string {
 export function withFoldMarker(line: string, id: string, width?: number): string {
   const state = getState();
   if (state.tuiMode !== "fullscreen" || !state.clickFoldReady) return line;
+  const existing = parseFoldMarker(line);
+  if (existing && existing !== id) return line;
   const body =
     state.hoveredFoldId === id ? paintHoverBg(line, width) : line;
-  if (parseFoldMarker(body) === id) return body;
+  if (existing === id || parseFoldMarker(body) === id) return body;
   return foldMarker(id) + body;
 }
 
@@ -104,6 +106,7 @@ export function wrapFoldBodyComponent(
   component: FoldBodyComponent,
   id: string,
   pad = 0,
+  onRender?: () => void,
 ): FoldBodyComponent {
   const actualPad = Math.max(0, pad);
   const spaces = actualPad > 0 ? " ".repeat(actualPad) : "";
@@ -115,6 +118,7 @@ export function wrapFoldBodyComponent(
 
   return {
     render(width: number) {
+      onRender?.();
       const inner = Math.max(1, width - actualPad);
       const childLines = component.render(inner);
       const state = getState();

@@ -28,10 +28,30 @@ Grok-flavored TUI for [pi](https://github.com/earendil-works/pi-coding-agent) �
   then back to compact.
 - Regular TUI keeps the **`(Ctrl+O)`** hint on chrome.
 
+### Codemode
+
+- Transparent rendering for Pi 1.5+ `codemode` tool calls instead of opaque `◆ Codemode` rows:
+  - **During turn execution:** keeps the nested `├─ / └─` call list visible across steps (`◇ Read 1 file, Ran 1 command (1/2)` while running, then completed `✓ / ✗ / ⊘` rows with durations/costs) until the turn concludes.
+  - **Once the turn finishes:** rolls up with surrounding steps into the single turn summary row (or collapses to a single Grok row for lone 1-block turns — `◆ Read \`…\``, `◇ Read 2 files, Wrote 1 file`, or `◆ Script \`<first statement>\`` for 0-call scripts); expanding a finished turn rollup shows each `codemode` in clean **single-line** form first.
+- **Two interactive zones in fullscreen:**
+  - **Title row:** clicking an expanded `codemode` title (`calls` or `full`) **immediately collapses** it back to 1 line; clicking a 1-line title expands it.
+  - **Lower region (call list / full script & output):** clicking the lower region cycles the 3-state view (**nested call list** → **full syntax-highlighted JS + output** → **collapsed 1-line**), with independent hover highlighting per zone. `codemode` rows never merge into cross-tool `◇ Ran N tools` groups.
+
 ### Compaction
 
 - Context compaction is restyled to grok chrome: **`◇ Compacted from N tokens`**, no native `[compaction]` label or purple block.
 - In **fullscreen**, click the row to expand/collapse the summary. **`Ctrl+O`** still cycles the global tool view (compact hides the summary body).
+
+### Custom messages & entries
+
+- Extension-rendered `custom_message` and `custom` session entries (`pi-subagents` supervisor requests/replies/notices, `pi-intercom` cards, background-task notices, etc.) collapse to a single Grok **`◇`** chrome row in compact mode (extracting the extension renderer's headline, e.g. `◇ [subagent] worker needs a decision`, `◇ [subagent] reply sent to worker`, `◇ [intercom] From …`), with no native purple `customMessageBg` block.
+- In **fullscreen**, click the `◇` row to expand the full message/entry body (background blocks stripped) and click anywhere in the expanded body to fold back; **`Ctrl+O`** cycles all custom blocks alongside tools. Pre-existing instances self-heal on first paint after `/reload`.
+
+### Turn work rollup
+
+- While a turn is actively thinking or running tools (no closing response or next user prompt below the work rows yet), each `◆ Thought`, tool, `codemode` subcall list, and custom status row stays live.
+- Once assistant prose — or a turn-closing boundary such as a follow-up user message, `/skill`, `!bash`, compaction/branch summary, or terminal error/abort — arrives below a contiguous stack of ≥2 work blocks (`Thought`, tools, `codemode` batches, `subagent`, custom chrome rows, plus any leading `Thought` inside the prose message), the entire stack automatically rolls up into **one Grok summary line** with total elapsed duration when available (e.g. `◇ Thought · Read 38 files, Wrote 8 files, Ran 3 commands · 2m 14s`, with ` · N failed` on error).
+- In **fullscreen**, clicking that `◇` summary row expands it in place (with `codemode` rows in compact single-line form, ready to expand individually), and clicking the top `◇` summary header folds the stack back into one line. `Ctrl+O` and `Alt+T` temporarily dissolve the rollup when viewing previews/full output or global thinking.
 
 ### User messages
 

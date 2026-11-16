@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.9] - 2026-11-16
+
+### Added
+
+- Turn work rollup with total duration: automatically merges contiguous stacks of ≥2 finished work blocks (`Thought`, tools, `codemode` nested calls, `subagent`, and custom chrome rows — including leading `Thought` blocks inside the prose message) into a single clickable `◇ Thought · Read …, Wrote …, Ran … · <duration>` summary row once closed by assistant prose OR by an interrupting user message / turn boundary, while keeping in-progress turns at the tail expanded live; expanding the rollup renders inner `codemode` blocks in compact single-line form, and clicking the top `◇` header folds the stack back.
+- Transparent 2-zone `codemode` rendering: keeps the `├─ / └─` nested call list visible throughout active turn execution until the turn closes, leniently parses 200-char truncated JSON `args` previews, and splits expanded `codemode` blocks into two independent fullscreen hover/click zones — clicking the **title row** collapses directly to 1 line, while clicking the **lower call-list / script body** cycles the 3-state view (`collapsed` → `calls` → `full` with preserved `CodeHighlighter` JS syntax colors) without merging sibling `codemode` rows into `◇ Ran N tools`.
+
+### Fixed
+
+- Re-open fold hyperlinks across Pi 1.5 `ScrollView` / `compositeTuiLine` leading `SEGMENT_RESET` (`ESC[0m` + bare OSC 8 close at column 0) in `injectFoldRow` so fullscreen mouse clicks reliably hit fold targets when the scrollbar is active, and lazily self-heal pre-existing `AssistantMessageComponent` instances on first paint after `/reload`.
+- Collapse extension-rendered `CustomMessageComponent` and `CustomEntryComponent` blocks (`pi-subagents` supervisor requests, `subagent_supervisor_reply` custom entries, steering/watchdog/slash notices, `pi-intercom` cards, and background-task notices) to a single Grok `◇` chrome row in compact mode instead of painting native purple `customMessageBg` boxes or multi-line wireframe cards.
+- Re-style pre-existing `ToolExecutionComponent`, `CustomMessageComponent`, and `CustomEntryComponent` instances lazily on their first paint after `/reload` (and re-stamp `chatContainer` children populated before `session_start` re-installs patches), fixing purple `[subagent]` blocks surviving `/reload`.
+- Strip `customMessageBg`, unwrap inner `MouseRegion` / `handleMouse` interceptors, and attach full-block fold markers when expanded via fullscreen click or `Ctrl+O`, while keeping tight 1-line chrome stacking and 1-line body gaps synchronized across sibling tool/custom toggles.
+- Make `InteractiveMode.setToolsExpanded(false)` a no-op when tools are already collapsed (`chrome` / `truncated`), matching native Pi so extensions like `pi-subagents` calling `ctx.ui.setToolsExpanded(false)` on every `subagent` run no longer wipe per-row click expansions or trigger a full-chat relayout, and keep a click-expanded standalone tool open if a consecutive collapsible tool joins its run.
+
 ## [0.3.8] - 2026-11-15
 
 ### Fixed
