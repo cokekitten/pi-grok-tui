@@ -6,11 +6,34 @@
  */
 import { Container } from "@earendil-works/pi-tui";
 import { effectiveToolMode } from "./tool-click.js";
-import { getState, getToolViewMode } from "./state.js";
+import { bumpChatLayoutVersion, getState, getToolViewMode } from "./state.js";
 
 const PARENT_KEY = "__piThinkingScrollParent";
+const CHILD_INDEX_KEY = Symbol.for("pi-grok-tui.childIndex");
+const CONTAINER_META_KEY = Symbol.for("pi-grok-tui.containerMeta");
+const STAMP_GEN_KEY = Symbol.for("pi-grok-tui.stampGen");
 export const CUSTOM_CHROME_MARK = "__piCustomChrome";
 const ROLLUP_HOOKS_KEY = Symbol.for("pi-grok-tui.rollupHooks");
+
+interface ContainerStampMeta {
+  stampGen: number;
+  len: number;
+  first: unknown;
+  last: unknown;
+  hasChatTurn: boolean;
+}
+
+function currentStampGen(): number {
+  const g = globalThis as Record<symbol, unknown>;
+  return typeof g[STAMP_GEN_KEY] === "number" ? g[STAMP_GEN_KEY] : 0;
+}
+
+function nextStampGen(): number {
+  const g = globalThis as Record<symbol, unknown>;
+  const next = currentStampGen() + 1;
+  g[STAMP_GEN_KEY] = next;
+  return next;
+}
 
 export interface WorkRollupHooks {
   hasOpenRollupHeaderAbove(node: unknown): boolean;
@@ -43,10 +66,33 @@ export function getSiblings(node: unknown): unknown[] | null {
   return parent.children;
 }
 
+export function getChildIndex(node: unknown): number {
+  if (!node || typeof node !== "object") return -1;
+  const siblings = getSiblings(node);
+  if (!siblings) return -1;
+  const hint = (node as Record<symbol, unknown>)[CHILD_INDEX_KEY];
+  if (
+    typeof hint === "number" &&
+    hint >= 0 &&
+    hint < siblings.length &&
+    siblings[hint] === node
+  ) {
+    return hint;
+  }
+  for (let i = 0; i < siblings.length; i++) {
+    const c = siblings[i];
+    if (c && typeof c === "object") {
+      (c as Record<symbol, unknown>)[CHILD_INDEX_KEY] = i;
+    }
+  }
+  const fresh = (node as Record<symbol, unknown>)[CHILD_INDEX_KEY];
+  return typeof fresh === "number" && siblings[fresh] === node ? fresh : -1;
+}
+
 export function getPreviousSibling(node: unknown): unknown | null {
   const siblings = getSiblings(node);
   if (!siblings) return null;
-  const idx = siblings.indexOf(node);
+  const idx = getChildIndex(node);
   if (idx <= 0) return null;
   return siblings[idx - 1] ?? null;
 }
@@ -54,7 +100,7 @@ export function getPreviousSibling(node: unknown): unknown | null {
 export function getNextSibling(node: unknown): unknown | null {
   const siblings = getSiblings(node);
   if (!siblings) return null;
-  const idx = siblings.indexOf(node);
+  const idx = getChildIndex(node);
   if (idx < 0 || idx + 1 >= siblings.length) return null;
   return siblings[idx + 1] ?? null;
 }
@@ -176,24 +222,20 @@ export function isChatTurnCloserNode(c: unknown): boolean {
  * has appeared after `node` yet — i.e., the agent turn is still executing.
  */
 export function isNodeInUnclosedChatTurn(node: unknown): boolean {
-  const siblings = getSiblings(node);
-  if (!siblings || siblings.length < 2) return false;
+  const parent = getParent(node);
+  const siblings = parent?.children;
+  if (!parent || !Array.isArray(siblings) || siblings.length < 2) return false;
   if (isChatTurnCloserNode(siblings[siblings.length - 1])) {
     return false;
   }
-  const idx = siblings.indexOf(node);
+  const idx = getChildIndex(node);
   if (idx < 0) return false;
   for (let k = siblings.length - 1; k > idx; k--) {
     if (isChatTurnCloserNode(siblings[k])) {
       return false;
     }
   }
-  for (let k = 0; k < siblings.length; k++) {
-    if (isAssistantMessageComponent(siblings[k]) || isUserMessageComponent(siblings[k])) {
-      return true;
-    }
-  }
-  return false;
+  return isChatContainer(parent);
 }
 
 /**
@@ -288,44 +330,115 @@ export function relayoutChild(child: unknown): void {
 }
 
 export function ensureContainerStamped(container: { children?: unknown[] }): void {
-  if (!Array.isArray(container.children)) return;
+  const children = container.children;
+  if (!Array.isArray(children)) return;
+  const len = children.length;
+  const gen = currentStampGen();
+  const holder = container as unknown as Record<symbol, unknown>;
+  if (len === 0) {
+    holder[CONTAINER_META_KEY] = {
+      stampGen: gen,
+      len: 0,
+      first: undefined,
+      last: undefined,
+      hasChatTurn: false,
+    } satisfies ContainerStampMeta;
+    return;
+  }
+
+  const first = children[0];
+  const last = children[len - 1];
+  const meta = holder[CONTAINER_META_KEY] as ContainerStampMeta | undefined;
+  if (
+    meta &&
+    meta.stampGen === gen &&
+    meta.len === len &&
+    meta.first === first &&
+    meta.last === last &&
+    (!last || typeof last !== "object" || (last as Record<string, unknown>)[PARENT_KEY] === container)
+  ) {
+    return;
+  }
+
+  let hasChatTurn = false;
   let hasUnstampedTarget = false;
-  for (const child of container.children) {
+  for (let i = 0; i < len; i++) {
+    const child = children[i];
+    if (!child || typeof child !== "object") continue;
+    (child as Record<symbol, unknown>)[CHILD_INDEX_KEY] = i;
+    if (!hasChatTurn && (isAssistantMessageComponent(child) || isUserMessageComponent(child))) {
+      hasChatTurn = true;
+    }
     if (
+      !hasUnstampedTarget &&
       (isRelayoutTarget(child) || isChatTurnCloserNode(child)) &&
       (child as Record<string, unknown>)[PARENT_KEY] !== container
     ) {
       hasUnstampedTarget = true;
-      break;
     }
   }
-  if (!hasUnstampedTarget) return;
+
   const newlyStamped: unknown[] = [];
-  for (const child of container.children) {
-    if (
-      child &&
-      typeof child === "object" &&
-      (child as Record<string, unknown>)[PARENT_KEY] !== container
-    ) {
-      (child as Record<string, unknown>)[PARENT_KEY] = container;
-      if (isRelayoutTarget(child)) {
-        newlyStamped.push(child);
+  if (hasUnstampedTarget) {
+    for (let i = 0; i < len; i++) {
+      const child = children[i];
+      if (
+        child &&
+        typeof child === "object" &&
+        (child as Record<string, unknown>)[PARENT_KEY] !== container
+      ) {
+        (child as Record<string, unknown>)[PARENT_KEY] = container;
+        if (isRelayoutTarget(child)) {
+          newlyStamped.push(child);
+        }
       }
     }
   }
-  for (const child of newlyStamped) {
-    relayoutChild(child);
-    const next = getNextSibling(child);
-    if (next) relayoutChild(next);
+
+  holder[CONTAINER_META_KEY] = {
+    stampGen: gen,
+    len,
+    first,
+    last,
+    hasChatTurn,
+  } satisfies ContainerStampMeta;
+
+  if (newlyStamped.length > 0) {
+    bumpChatLayoutVersion();
+    for (const child of newlyStamped) {
+      relayoutChild(child);
+      const next = getNextSibling(child);
+      if (next) relayoutChild(next);
+    }
   }
 }
 
+export function isChatContainer(container: { children?: unknown[] } | null | undefined): boolean {
+  if (!container || !Array.isArray(container.children) || container.children.length === 0) {
+    return false;
+  }
+  ensureContainerStamped(container);
+  const meta = (container as unknown as Record<symbol, unknown>)[CONTAINER_META_KEY] as
+    | ContainerStampMeta
+    | undefined;
+  if (meta) return meta.hasChatTurn;
+  for (const c of container.children) {
+    if (isAssistantMessageComponent(c) || isUserMessageComponent(c)) return true;
+  }
+  return false;
+}
+
 export function installParentStamp(): () => void {
+  const gen = nextStampGen();
   const proto = Container.prototype as {
     addChild: (this: { children?: unknown[] }, child: unknown) => void;
+    removeChild?: (this: { children?: unknown[] }, child: unknown) => void;
+    clear?: (this: { children?: unknown[] }) => void;
     render?: (this: { children?: unknown[] }, width: number) => string[];
   };
   const originalAddChild = proto.addChild;
+  const originalRemoveChild = proto.removeChild;
+  const originalClear = proto.clear;
   const originalRender = proto.render;
 
   proto.addChild = function (this: { children?: unknown[] }, child: unknown) {
@@ -333,10 +446,47 @@ export function installParentStamp(): () => void {
       (child as Record<string, unknown>)[PARENT_KEY] = this;
     }
     const ret = originalAddChild.call(this, child);
+    const children = this.children;
+    if (Array.isArray(children) && child && typeof child === "object") {
+      const newLen = children.length;
+      (child as Record<symbol, unknown>)[CHILD_INDEX_KEY] = newLen - 1;
+      const holder = this as unknown as Record<symbol, unknown>;
+      const meta = holder[CONTAINER_META_KEY] as ContainerStampMeta | undefined;
+      if (meta && meta.stampGen === gen && meta.len === newLen - 1) {
+        meta.len = newLen;
+        meta.first = children[0];
+        meta.last = child;
+        if (
+          !meta.hasChatTurn &&
+          (isAssistantMessageComponent(child) || isUserMessageComponent(child))
+        ) {
+          meta.hasChatTurn = true;
+        }
+      } else {
+        holder[CONTAINER_META_KEY] = undefined;
+      }
+    }
+    bumpChatLayoutVersion();
     // Only top-level assistant/tool/custom — not every Spacer/Text under them.
     relayoutChild(child);
     return ret;
   };
+
+  if (typeof originalRemoveChild === "function") {
+    proto.removeChild = function (this: { children?: unknown[] }, child: unknown) {
+      (this as unknown as Record<symbol, unknown>)[CONTAINER_META_KEY] = undefined;
+      bumpChatLayoutVersion();
+      return originalRemoveChild.call(this, child);
+    };
+  }
+
+  if (typeof originalClear === "function") {
+    proto.clear = function (this: { children?: unknown[] }) {
+      (this as unknown as Record<symbol, unknown>)[CONTAINER_META_KEY] = undefined;
+      bumpChatLayoutVersion();
+      return originalClear.call(this);
+    };
+  }
 
   if (typeof originalRender === "function") {
     proto.render = function (this: { children?: unknown[] }, width: number) {
@@ -347,6 +497,12 @@ export function installParentStamp(): () => void {
 
   return () => {
     proto.addChild = originalAddChild;
+    if (typeof originalRemoveChild === "function") {
+      proto.removeChild = originalRemoveChild;
+    }
+    if (typeof originalClear === "function") {
+      proto.clear = originalClear;
+    }
     if (typeof originalRender === "function") {
       proto.render = originalRender;
     }

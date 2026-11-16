@@ -7,7 +7,7 @@ import {
   nextThinkingExpanded,
 } from "./click-fold-core.ts";
 import { renderClickableChrome, thinkingFoldId } from "./click-fold.ts";
-import { getState } from "./state.ts";
+import { bumpChatLayoutVersion, getState } from "./state.ts";
 
 export function thinkingIsExpanded(timestamp: number): boolean {
   const state = getState();
@@ -22,6 +22,7 @@ export function toggleThinkingAt(timestamp: number): void {
   const state = getState();
   const current = thinkingIsExpanded(timestamp);
   state.thinkingOverrides.set(timestamp, nextThinkingExpanded(current));
+  bumpChatLayoutVersion();
 }
 
 /** Alt+T / Option+T / Ctrl+Shift+H: global toggle, forget per-row clicks. */
@@ -29,6 +30,7 @@ export function applyGlobalThinkingToggle(): boolean {
   const state = getState();
   state.thinkingOverrides.clear();
   state.globalExpanded = !state.globalExpanded;
+  bumpChatLayoutVersion();
   return state.globalExpanded;
 }
 

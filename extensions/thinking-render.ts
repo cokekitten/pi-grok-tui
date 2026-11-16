@@ -16,9 +16,13 @@ import {
   type ChromeTheme,
 } from "./chrome.js";
 import { getState } from "./state.js";
-import { thinkingFoldId } from "./click-fold.js";
+import { registerFoldHandler, thinkingFoldId } from "./click-fold.js";
 import { withFoldMarker } from "./fold-body.js";
-import { renderThinkingChromeLine, thinkingIsExpanded } from "./thinking-click.js";
+import {
+  renderThinkingChromeLine,
+  thinkingIsExpanded,
+  toggleThinkingAt,
+} from "./thinking-click.js";
 
 export const MAX_VISIBLE_LINES = 3;
 
@@ -35,6 +39,9 @@ function stripAnsiLocal(s: string): string {
 export class ThinkingScrollComponent {
   private static SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+  private fullText: string;
+  private readonly foldId: string;
+  private readonly onToggle: () => void;
   private lastRenderedText = "";
   private cachedLines?: string[];
   private cachedWidth?: number;
@@ -42,7 +49,8 @@ export class ThinkingScrollComponent {
   private cachedActive?: boolean;
   private cachedTuiMode?: string;
   private cachedClickFoldReady?: boolean;
-  private cachedHoveredFoldId?: string;
+  private cachedHovered?: boolean;
+  private cachedThemeSample?: string;
   private cachedMarkdownKey?: string;
   private cachedMarkdownLines?: string[];
   private markdown?: Markdown;
@@ -54,10 +62,15 @@ export class ThinkingScrollComponent {
     private messageTimestamp: number,
     private thinkingBlocks: { text: string; redacted?: boolean }[],
     private transform?: (markdown: string, availableWidth: number) => string,
-  ) {}
+  ) {
+    this.fullText = thinkingBlocks.map((b) => b.text).join("\n");
+    this.foldId = thinkingFoldId(messageTimestamp);
+    this.onToggle = () => toggleThinkingAt(messageTimestamp);
+  }
 
   setThinkingBlocks(blocks: { text: string; redacted?: boolean }[]): void {
     this.thinkingBlocks = blocks;
+    this.fullText = blocks.map((b) => b.text).join("\n");
     // Context (e.g. isStreaming) can change even when source text does not.
     // Keep Markdown's expensive block cache, but re-evaluate derived output.
     this.cachedLines = undefined;
@@ -67,9 +80,12 @@ export class ThinkingScrollComponent {
     const state = getState();
     const isExpanded = thinkingIsExpanded(this.messageTimestamp);
     const isActive = state.activeByTimestamp.has(this.messageTimestamp);
-    const fullText = this.thinkingBlocks.map((b) => b.text).join("\n");
+    const fullText = this.fullText;
     const pad = RESPONSE_LEFT_PAD;
     const innerWidth = Math.max(1, width - pad);
+    const clickActive = state.tuiMode === "fullscreen" && state.clickFoldReady;
+    const ownHovered = clickActive && state.hoveredFoldId === this.foldId;
+    const themeSample = safeFg(this.theme, "muted", "m");
 
     if (
       !isActive &&
@@ -79,9 +95,13 @@ export class ThinkingScrollComponent {
       this.cachedActive === isActive &&
       this.cachedTuiMode === state.tuiMode &&
       this.cachedClickFoldReady === state.clickFoldReady &&
-      this.cachedHoveredFoldId === state.hoveredFoldId &&
+      this.cachedHovered === ownHovered &&
+      this.cachedThemeSample === themeSample &&
       this.lastRenderedText === fullText
     ) {
+      if (clickActive) {
+        registerFoldHandler(this.foldId, this.onToggle);
+      }
       return this.cachedLines;
     }
 
@@ -91,7 +111,8 @@ export class ThinkingScrollComponent {
     this.cachedActive = isActive;
     this.cachedTuiMode = state.tuiMode;
     this.cachedClickFoldReady = state.clickFoldReady;
-    this.cachedHoveredFoldId = state.hoveredFoldId;
+    this.cachedHovered = ownHovered;
+    this.cachedThemeSample = themeSample;
 
     let lines: string[];
     if (isActive) {
@@ -244,7 +265,8 @@ export class ThinkingScrollComponent {
     this.lastRenderedText = "";
     this.cachedTuiMode = undefined;
     this.cachedClickFoldReady = undefined;
-    this.cachedHoveredFoldId = undefined;
+    this.cachedHovered = undefined;
+    this.cachedThemeSample = undefined;
     this.cachedMarkdownKey = undefined;
     this.cachedMarkdownLines = undefined;
   }

@@ -39,6 +39,8 @@ export interface ThinkingScrollState {
   messageEndByTimestamp: Map<number, number>;
   /** True while installWorkRollupPatch is active. */
   workRollupInstalled?: boolean;
+  /** Monotonic counter bumped on structural/expansion/timing state mutations. */
+  chatLayoutVersion: number;
   patchRefCount: number;
   patchCleanup?: (() => void) | undefined;
   patchInstallPromise?: Promise<() => void> | undefined;
@@ -84,6 +86,9 @@ function ensureClickFoldState(state: ThinkingScrollState): ThinkingScrollState {
   if (typeof state.hoveredFoldId !== "string") {
     state.hoveredFoldId = undefined;
   }
+  if (typeof state.chatLayoutVersion !== "number") {
+    state.chatLayoutVersion = 0;
+  }
   return state;
 }
 
@@ -113,10 +118,20 @@ export function getState(): ThinkingScrollState {
     thinkingEndByTimestamp: new Map(),
     messageEndByTimestamp: new Map(),
     workRollupInstalled: false,
+    chatLayoutVersion: 0,
     patchRefCount: 0,
   };
   (globalThis as any)[STATE_KEY] = created;
   return created;
+}
+
+export function bumpChatLayoutVersion(): void {
+  const state = getState();
+  state.chatLayoutVersion += 1;
+}
+
+export function getChatLayoutVersion(): number {
+  return getState().chatLayoutVersion;
 }
 
 /** Drop per-row click overrides. Leaves tuiMode / clickFoldReady alone. */
@@ -128,6 +143,7 @@ export function resetClickFoldSession(): void {
   state.expandedWorkRollups = new WeakSet();
   state.initializedWorkRollups = new WeakSet();
   state.hoveredFoldId = undefined;
+  state.chatLayoutVersion += 1;
 }
 
 /** Ctrl+O: forget tool/custom/group clicks; keep thinking overrides. */
@@ -136,6 +152,7 @@ export function clearToolFoldOverrides(): void {
   state.viewOverrides = new WeakMap();
   state.expandedGroupHeaders = new WeakSet();
   state.expandedWorkRollups = new WeakSet();
+  state.chatLayoutVersion += 1;
 }
 
 export function getViewOverride(target: object): ToolViewMode | undefined {
@@ -143,11 +160,15 @@ export function getViewOverride(target: object): ToolViewMode | undefined {
 }
 
 export function setViewOverride(target: object, mode: ToolViewMode): void {
-  getState().viewOverrides.set(target, mode);
+  const state = getState();
+  state.viewOverrides.set(target, mode);
+  state.chatLayoutVersion += 1;
 }
 
 export function clearViewOverride(target: object): void {
-  getState().viewOverrides.delete(target);
+  const state = getState();
+  state.viewOverrides.delete(target);
+  state.chatLayoutVersion += 1;
 }
 
 export function isGroupExpanded(header: object): boolean {
@@ -155,9 +176,10 @@ export function isGroupExpanded(header: object): boolean {
 }
 
 export function setGroupExpanded(header: object, expanded: boolean): void {
-  const set = getState().expandedGroupHeaders;
-  if (expanded) set.add(header);
-  else set.delete(header);
+  const state = getState();
+  if (expanded) state.expandedGroupHeaders.add(header);
+  else state.expandedGroupHeaders.delete(header);
+  state.chatLayoutVersion += 1;
 }
 
 export function isWorkRollupExpanded(proseTarget: object): boolean {
@@ -165,9 +187,10 @@ export function isWorkRollupExpanded(proseTarget: object): boolean {
 }
 
 export function setWorkRollupExpanded(proseTarget: object, expanded: boolean): void {
-  const set = getState().expandedWorkRollups;
-  if (expanded) set.add(proseTarget);
-  else set.delete(proseTarget);
+  const state = getState();
+  if (expanded) state.expandedWorkRollups.add(proseTarget);
+  else state.expandedWorkRollups.delete(proseTarget);
+  state.chatLayoutVersion += 1;
 }
 
 export function isWorkRollupInitialized(proseTarget: object): boolean {
@@ -175,7 +198,9 @@ export function isWorkRollupInitialized(proseTarget: object): boolean {
 }
 
 export function markWorkRollupInitialized(proseTarget: object): void {
-  getState().initializedWorkRollups.add(proseTarget);
+  const state = getState();
+  state.initializedWorkRollups.add(proseTarget);
+  state.chatLayoutVersion += 1;
 }
 
 export function getToolViewMode(): ToolViewMode {
@@ -188,6 +213,7 @@ export function cycleToolViewMode(): ToolViewMode {
   const idx = MODE_ORDER.indexOf(state.toolViewMode);
   const next = MODE_ORDER[(idx + 1) % MODE_ORDER.length]!;
   state.toolViewMode = next;
+  state.chatLayoutVersion += 1;
   return next;
 }
 
@@ -212,9 +238,13 @@ function setBoundedMapEntry(map: Map<number, number>, key: number, value: number
 }
 
 export function recordThinkingEnd(timestamp: number, atMs = Date.now()): void {
-  setBoundedMapEntry(getState().thinkingEndByTimestamp, timestamp, atMs);
+  const state = getState();
+  setBoundedMapEntry(state.thinkingEndByTimestamp, timestamp, atMs);
+  state.chatLayoutVersion += 1;
 }
 
 export function recordMessageEnd(timestamp: number, atMs = Date.now()): void {
-  setBoundedMapEntry(getState().messageEndByTimestamp, timestamp, atMs);
+  const state = getState();
+  setBoundedMapEntry(state.messageEndByTimestamp, timestamp, atMs);
+  state.chatLayoutVersion += 1;
 }

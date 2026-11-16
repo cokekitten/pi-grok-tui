@@ -28,6 +28,7 @@ import {
   INTERNAL_MODULES,
 } from "./internal-import.js";
 import {
+  getChildIndex,
   getNextSibling,
   getPreviousSibling,
   getSiblings,
@@ -44,7 +45,9 @@ import {
   wrapFoldBodyComponent,
 } from "./fold-body.js";
 import {
+  bumpChatLayoutVersion,
   clearViewOverride,
+  getChatLayoutVersion,
   getState,
   getToolViewMode,
   getViewOverride,
@@ -103,7 +106,10 @@ interface ToolExecutionProto {
     clear(): void;
     addChild(c: unknown): void;
     children?: unknown[];
+    mouseLayout?: unknown;
   };
+  selfRenderHeight?: number;
+  mouseLayout?: unknown;
   callRendererComponent?: unknown;
   resultRendererComponent?: unknown;
   imageComponents: unknown[];
@@ -123,6 +129,7 @@ interface ToolExecutionProto {
 const TITLE_MARK = "__piToolTitle";
 const TOOL_PATCHED_GEN = Symbol.for("pi-grok-tui.toolPatchedGen");
 const TOOL_GEN_COUNTER = Symbol.for("pi-grok-tui.toolGenCounter");
+const EMPTY_LINES: readonly string[] = Object.freeze([]);
 const passthrough = (t: string) => t;
 
 function nextToolPatchGeneration(): number {
@@ -190,7 +197,7 @@ function consecutiveGroup(self: ToolExecutionProto): {
   if (!siblings) {
     return { members: [self], header: self, isHeader: true };
   }
-  const selfIdx = siblings.indexOf(self);
+  const selfIdx = siblings === getSiblings(self) ? getChildIndex(self) : siblings.indexOf(self);
   if (selfIdx < 0) {
     return { members: [self], header: self, isHeader: true };
   }
@@ -860,7 +867,28 @@ export async function installToolCollapsePatch(): Promise<() => void> {
   const showsBodyState = new WeakMap<object, boolean>();
   const wasRunningTool = new WeakMap<object, boolean>();
   const lastCodemodeAutoTree = new WeakMap<object, boolean>();
+  const lastAutoTreeCheckedVer = new WeakMap<object, number>();
   const wasStandaloneInParent = new WeakSet<object>();
+  type ToolRenderCache =
+    | {
+        kind: "self";
+        width: number;
+        kids: unknown[];
+        kidOuts: Array<readonly string[]>;
+        innerMouseLayout: unknown;
+        selfRenderHeight: number | undefined;
+        lines: string[];
+      }
+    | {
+        kind: "default";
+        width: number;
+        spLines: number;
+        mainChild: unknown;
+        mainOut: readonly string[];
+        mouseLayout: unknown;
+        lines: string[];
+      };
+  const toolRenderCache = new WeakMap<object, ToolRenderCache>();
   const syncNextSiblingOnBodyChange = (self: ToolExecutionProto, showsBody: boolean) => {
     const prev = showsBodyState.get(self);
     showsBodyState.set(self, showsBody);
@@ -886,8 +914,10 @@ export async function installToolCollapsePatch(): Promise<() => void> {
 
   const patchedUpdateDisplay = function (this: ToolExecutionProto) {
     (this as unknown as Record<symbol, unknown>)[TOOL_PATCHED_GEN] = generation;
+    toolRenderCache.delete(this);
     if (updating.has(this)) return;
     updating.add(this);
+    bumpChatLayoutVersion();
     // Pi 1.5 defers streamed args until render(). Chrome/group branches skip
     // native updateDisplay, so they must acknowledge the batch themselves.
     this.argsPending = false;
@@ -917,6 +947,7 @@ export async function installToolCollapsePatch(): Promise<() => void> {
         });
         const prevAutoTree = lastCodemodeAutoTree.get(this);
         lastCodemodeAutoTree.set(this, summary.autoTree);
+        lastAutoTreeCheckedVer.set(this, getChatLayoutVersion());
         if (prevAutoTree === true && !summary.autoTree) {
           clearViewOverride(this);
         }
@@ -1107,22 +1138,112 @@ export async function installToolCollapsePatch(): Promise<() => void> {
         }
       } else if (isCodemodeTool(this.toolName)) {
         const running = isToolRunning(this);
-        const wantAutoTree = isCodemodeAutoTree(
-          extractCodemodeCalls(this.result?.details),
-          {
-            running,
-            inUnclosedTurn: isNodeInUnclosedChatTurn(this),
-            isError: !running && this.result?.isError === true,
-          },
-        );
-        if (lastCodemodeAutoTree.get(this) !== wantAutoTree) {
-          try {
-            this.updateDisplay();
-          } catch {
-            /* never break render */
+        const curVer = getChatLayoutVersion();
+        if (
+          running ||
+          lastAutoTreeCheckedVer.get(this) !== curVer ||
+          !lastCodemodeAutoTree.has(this)
+        ) {
+          lastAutoTreeCheckedVer.set(this, curVer);
+          const wantAutoTree = isCodemodeAutoTree(
+            extractCodemodeCalls(this.result?.details),
+            {
+              running,
+              inUnclosedTurn: isNodeInUnclosedChatTurn(this),
+              isError: !running && this.result?.isError === true,
+            },
+          );
+          if (lastCodemodeAutoTree.get(this) !== wantAutoTree) {
+            try {
+              this.updateDisplay();
+            } catch {
+              /* never break render */
+            }
           }
         }
       }
+
+      if (!this.argsPending) {
+        if (this.hideComponent) {
+          return EMPTY_LINES as string[];
+        }
+
+        const hasImages =
+          Array.isArray(this.imageComponents) && this.imageComponents.length > 0;
+        if (!hasImages && !isToolRunning(this)) {
+          const hit = toolRenderCache.get(this);
+          if (this.hasRendererDefinition() && this.getRenderShell() === "self") {
+            const rcKids = this.selfRenderContainer?.children;
+            if (Array.isArray(rcKids)) {
+              const kidOuts: Array<readonly string[]> = new Array(rcKids.length);
+              let matched =
+                hit !== undefined &&
+                hit.kind === "self" &&
+                hit.width === width &&
+                hit.kids.length === rcKids.length;
+              for (let i = 0; i < rcKids.length; i++) {
+                const k = rcKids[i] as { render?: (w: number) => string[] } | undefined;
+                if (!k || typeof k.render !== "function" || (matched && hit!.kind === "self" && hit!.kids[i] !== k)) {
+                  matched = false;
+                }
+                kidOuts[i] = k && typeof k.render === "function" ? k.render(width) : EMPTY_LINES;
+                if (matched && hit!.kind === "self" && hit!.kidOuts[i] !== kidOuts[i]) {
+                  matched = false;
+                }
+              }
+              if (matched && hit && hit.kind === "self") {
+                this.selfRenderContainer.mouseLayout = hit.innerMouseLayout;
+                this.selfRenderHeight = hit.selfRenderHeight;
+                return hit.lines;
+              }
+              const lines = originalRender.call(this, width);
+              toolRenderCache.set(this, {
+                kind: "self",
+                width,
+                kids: rcKids.slice(),
+                kidOuts,
+                innerMouseLayout: this.selfRenderContainer.mouseLayout,
+                selfRenderHeight: this.selfRenderHeight,
+                lines,
+              });
+              return lines;
+            }
+          } else if (
+            Array.isArray(this.children) &&
+            this.children.length === 2 &&
+            isSpacer(this.children[0])
+          ) {
+            const spLines = this.children[0].lines;
+            const mainChild = this.children[1] as { render?: (w: number) => string[] } | undefined;
+            if (mainChild && typeof mainChild.render === "function") {
+              const mainOut = mainChild.render(width);
+              if (
+                hit &&
+                hit.kind === "default" &&
+                hit.width === width &&
+                hit.spLines === spLines &&
+                hit.mainChild === mainChild &&
+                hit.mainOut === mainOut
+              ) {
+                this.mouseLayout = hit.mouseLayout;
+                return hit.lines;
+              }
+              const lines = originalRender.call(this, width);
+              toolRenderCache.set(this, {
+                kind: "default",
+                width,
+                spLines,
+                mainChild,
+                mainOut,
+                mouseLayout: this.mouseLayout,
+                lines,
+              });
+              return lines;
+            }
+          }
+        }
+      }
+
       return originalRender.call(this, width);
     };
   }

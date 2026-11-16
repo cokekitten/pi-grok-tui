@@ -32,6 +32,8 @@ interface UserMessageProto extends MarkdownTransformSource {
   text: string;
   markdownTheme: unknown;
   outputPad: number;
+  children?: unknown[];
+  mouseLayout?: unknown;
   clear(): void;
   addChild(c: unknown): void;
   rebuild(): void;
@@ -84,7 +86,14 @@ export function createUserMessagePrototypePatch(
   const originalRender = prototype.render;
   const rowCache = new WeakMap<
     UserMessageProto,
-    { raw: readonly string[]; marked: string[] }
+    {
+      width: number;
+      bodyChild?: unknown;
+      bodyLines?: readonly string[];
+      mouseLayout?: unknown;
+      raw: readonly string[];
+      marked: string[];
+    }
   >();
 
   // Mark the actual component boundary, not the ❯ glyph or generic OSC 133.
@@ -103,17 +112,52 @@ export function createUserMessagePrototypePatch(
         /* keep whatever children the failed rebuild left behind */
       }
     }
-    const raw = originalRender.call(this, width);
+
+    const singleBody =
+      Array.isArray(this.children) &&
+      this.children.length === 1 &&
+      this.children[0] &&
+      typeof (this.children[0] as { render?: unknown }).render === "function"
+        ? (this.children[0] as { render(w: number): string[] })
+        : undefined;
     const cached = rowCache.get(this);
+    let bodyLines: readonly string[] | undefined;
+    if (singleBody) {
+      bodyLines = singleBody.render(width);
+      if (
+        cached &&
+        cached.width === width &&
+        cached.bodyChild === singleBody &&
+        cached.bodyLines === bodyLines
+      ) {
+        if (cached.mouseLayout !== undefined) {
+          this.mouseLayout = cached.mouseLayout;
+        }
+        return cached.marked;
+      }
+    }
+
+    const raw = originalRender.call(this, width);
     if (
       cached &&
       cached.raw.length === raw.length &&
       cached.raw.every((line, i) => line === raw[i])
     ) {
+      cached.width = width;
+      cached.bodyChild = singleBody;
+      cached.bodyLines = bodyLines;
+      cached.mouseLayout = this.mouseLayout;
       return cached.marked;
     }
     const marked = markRows(raw);
-    rowCache.set(this, { raw, marked });
+    rowCache.set(this, {
+      width,
+      bodyChild: singleBody,
+      bodyLines,
+      mouseLayout: this.mouseLayout,
+      raw,
+      marked,
+    });
     return marked;
   };
 

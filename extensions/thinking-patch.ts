@@ -11,9 +11,9 @@ import {
   getPreviousSibling,
   getWorkRollupHooks,
   shouldGapAfter,
-  shouldGapBefore,
 } from "./parent-stamp.js";
 import { RESPONSE_LEFT_PAD, safeFg } from "./chrome.js";
+import { bumpChatLayoutVersion } from "./state.js";
 import { ThinkingScrollComponent, type ThinkingThemeLike } from "./thinking-render.js";
 import { markdownTransformFor, type MarkdownTransformSource } from "./markdown-transform.ts";
 
@@ -49,7 +49,10 @@ interface AssistantMessageComponentProto extends MarkdownTransformSource {
   contentContainer: {
     clear(): void;
     addChild(component: unknown): void;
+    children?: unknown[];
+    mouseLayout?: unknown;
   };
+  mouseLayout?: unknown;
   lastMessage?: AssistantMessage;
   isStreaming?: boolean;
   hideThinkingBlock: boolean;
@@ -73,7 +76,7 @@ function createDynamicLeadGap(
         return EMPTY_LINES as string[];
       }
       const prev = getPreviousSibling(owner);
-      if (shouldGapBefore(owner)) {
+      if (shouldGapAfter(prev)) {
         return ONE_BLANK_LINE as string[];
       }
       if (opts.hasText && prev == null) {
@@ -158,6 +161,15 @@ export async function installThinkingPatch(): Promise<() => void> {
     outputPad?: number;
     timestamp: number;
   }>();
+  const amcRenderCache = new WeakMap<object, {
+    width: number;
+    hasToolCalls: boolean;
+    kids: unknown[];
+    kidOutputs: Array<readonly string[] | number>;
+    innerMouseLayout: unknown;
+    outerMouseLayout: unknown;
+    lines: string[];
+  }>();
 
   const patchedUpdateContent = function (
     this: AssistantMessageComponentProto,
@@ -165,6 +177,8 @@ export async function installThinkingPatch(): Promise<() => void> {
     isStreaming = this.isStreaming ?? false,
   ) {
     this[AMC_PATCHED_GEN] = generation;
+    amcRenderCache.delete(this);
+    bumpChatLayoutVersion();
     this.lastMessage = message;
     this.isStreaming = isStreaming;
 
@@ -337,6 +351,73 @@ export async function installThinkingPatch(): Promise<() => void> {
           /* never break render */
         }
       }
+
+      const kids = !this.isStreaming ? this.contentContainer?.children : undefined;
+      if (Array.isArray(kids)) {
+        if (kids.length === 0) {
+          this.contentContainer.mouseLayout = { width, children: [] };
+          this.mouseLayout = {
+            width,
+            children: [{ component: this.contentContainer, height: 0 }],
+          };
+          return EMPTY_LINES as string[];
+        }
+        const hit = amcRenderCache.get(this);
+        const hasTools = Boolean(this.hasToolCalls);
+        if (
+          hit !== undefined &&
+          hit.width === width &&
+          hit.hasToolCalls === hasTools &&
+          hit.kids.length === kids.length
+        ) {
+          let matched = true;
+          for (let i = 0; i < kids.length; i++) {
+            const kid = kids[i] as { lines?: unknown; render?: (w: number) => string[] } | undefined;
+            if (!kid || hit.kids[i] !== kid) {
+              matched = false;
+              break;
+            }
+            const out =
+              kid.constructor === Spacer && typeof kid.lines === "number"
+                ? kid.lines
+                : typeof kid.render === "function"
+                  ? kid.render(width)
+                  : -1;
+            if (out === -1 || hit.kidOutputs[i] !== out) {
+              matched = false;
+              break;
+            }
+          }
+          if (matched) {
+            this.contentContainer.mouseLayout = hit.innerMouseLayout;
+            this.mouseLayout = hit.outerMouseLayout;
+            return hit.lines;
+          }
+        }
+
+        const lines = originalRender.call(this, width);
+        const nextOutputs: Array<readonly string[] | number> = new Array(kids.length);
+        for (let i = 0; i < kids.length; i++) {
+          const kid = kids[i] as { lines?: unknown; render?: (w: number) => string[] } | undefined;
+          nextOutputs[i] =
+            kid && kid.constructor === Spacer && typeof kid.lines === "number"
+              ? kid.lines
+              : kid && typeof kid.render === "function"
+                ? kid.render(width)
+                : -1;
+        }
+        amcRenderCache.set(this, {
+          width,
+          hasToolCalls: hasTools,
+          kids: kids.slice(),
+          kidOutputs: nextOutputs,
+          innerMouseLayout: this.contentContainer.mouseLayout,
+          outerMouseLayout: this.mouseLayout,
+          lines,
+        });
+        return lines;
+      }
+
       return originalRender.call(this, width);
     };
   }

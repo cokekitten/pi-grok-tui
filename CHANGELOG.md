@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.10] - 2026-11-16
+
+### Fixed
+
+- Eliminate per-frame `O(N)` / `O(N²)` scroll and hover overhead introduced by `0.3.9` work rollups on large transcripts:
+  - Cache child classifications, `WorkRollupScan` results, `WorkRollupSummary` aggregations, and slot-identity frame assembly in `work-rollup.ts` (in-place slice patching when hover moves between rows without changing heights), avoiding per-frame `Date.parse`, wall-time regexes, `extractCodemodeCalls`, and 6,000+ object/array allocations + GC churn.
+  - Stamp self-verifying `O(1)` sibling indices and container metadata in `parent-stamp.ts` (replacing repeated `siblings.indexOf(...)` and full-container walks across every `Container.render`), and walk local neighbors in `collapsibleRun` instead of `siblings.map(classifySibling)`.
+  - Cache finished `AssistantMessageComponent`, `ToolExecutionComponent`, and `UserMessageComponent` render line arrays and `mouseLayout`s by child array identity, and key `ThinkingScrollComponent` on its own fold hover state instead of global `hoveredFoldId` (`chat.render` ~18.4ms → ~1.7ms on a 6,222-child session; full wheel frame ~29.1ms → ~11.5ms).
+
 ## [0.3.9] - 2026-11-16
 
 ### Added

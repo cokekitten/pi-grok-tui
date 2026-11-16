@@ -1,6 +1,6 @@
 {
   "name": "pi-grok-tui",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "Grok-flavored pi TUI: compact thinking, tool chrome, user bubbles, spacing.",
   "type": "module",
   "license": "MIT",

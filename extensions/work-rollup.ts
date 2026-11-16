@@ -7,7 +7,7 @@
  * While a turn is still executing tools or thinking without a closer below it,
  * no rollup forms so live step-by-step progress remains visible.
  */
-import { Container } from "@earendil-works/pi-tui";
+import { Container, Spacer } from "@earendil-works/pi-tui";
 import {
   RESPONSE_LEFT_PAD,
   type ChromeKind,
@@ -29,6 +29,7 @@ import {
   ensureContainerStamped,
   getParent,
   isAssistantMessageComponent,
+  isChatContainer,
   isCustomChromeComponent,
   isNonProseTurnCloserComponent,
   isUserMessageComponent,
@@ -38,6 +39,7 @@ import {
 } from "./parent-stamp.js";
 import {
   clearViewOverride,
+  getChatLayoutVersion,
   getState,
   getViewOverride,
   isGroupExpanded,
@@ -54,7 +56,23 @@ import { verbKindForTool } from "./tool-titles.js";
 const ROLLUP_PASS_KEY = Symbol.for("pi-grok-tui.rollupPassCache");
 const MAX_DISPLAY_BUCKETS = 4;
 const NOOP_MOUSE_COMPONENT = Object.freeze({});
+const EMPTY_LINES: readonly string[] = Object.freeze([]);
+const ONE_BLANK_LINE: readonly string[] = Object.freeze([""]);
+const spacerArrayCache = new Map<number, readonly string[]>([
+  [0, EMPTY_LINES],
+  [1, ONE_BLANK_LINE],
+]);
 const CODEMODE_WALL_TIME_RE = /^Script (?:completed|failed)\nWall time ([\d.]+) seconds\n/;
+
+function spacerLinesArray(lines: number): string[] {
+  const n = lines > 0 ? Math.floor(lines) : 0;
+  let cached = spacerArrayCache.get(n);
+  if (!cached) {
+    cached = Object.freeze(new Array<string>(n).fill(""));
+    spacerArrayCache.set(n, cached);
+  }
+  return cached as string[];
+}
 
 type RollupVerbKind =
   | "read"
@@ -139,6 +157,8 @@ export interface WorkRollupSegment {
   leadBlank: boolean;
   visibleBlocks: number;
   items: ClassifiedChatChild[];
+  _summary?: WorkRollupSummary;
+  _foldId?: string;
 }
 
 export interface WorkRollupScan {
@@ -259,11 +279,66 @@ function isToolRunningLike(t: { isPartial?: boolean; result?: unknown }): boolea
   return t.result == null;
 }
 
+const BOUNDARY_CLASSIFIED: ClassifiedChatChild = Object.freeze({ kind: "boundary" });
+const ACTIVE_CLASSIFIED: ClassifiedChatChild = Object.freeze({ kind: "active" });
+
+type CachedChildClassification =
+  | { tag: "spacer"; lines: number; out: ClassifiedChatChild }
+  | {
+      tag: "amc";
+      isStreaming: boolean;
+      lastMessage: unknown;
+      contentLen: number;
+      lastBlock: unknown;
+      stopReason: unknown;
+      msgTs: unknown;
+      amcTs: unknown;
+      liveThinkEndMs: number | undefined;
+      liveMsgEndMs: number | undefined;
+      out: ClassifiedChatChild;
+    }
+  | {
+      tag: "tool";
+      running: boolean;
+      toolName: string;
+      args: unknown;
+      result: unknown;
+      cwd: string | undefined;
+      startedAt: unknown;
+      finishedAt: unknown;
+      resTs: unknown;
+      resDur: unknown;
+      resErr: unknown;
+      resDetails: unknown;
+      resContent: unknown;
+      out: ClassifiedChatChild;
+    }
+  | {
+      tag: "custom";
+      hasContent: boolean;
+      msg: unknown;
+      entry: unknown;
+      ts: unknown;
+      msgTs: unknown;
+      entryTs: unknown;
+      out: ClassifiedChatChild;
+    }
+  | { tag: "static"; out: ClassifiedChatChild };
+
+const childClassificationCache = new WeakMap<object, CachedChildClassification>();
+
 export function classifyChatChild(c: unknown): ClassifiedChatChild {
-  if (!c || typeof c !== "object") return { kind: "boundary" };
+  if (!c || typeof c !== "object") return BOUNDARY_CLASSIFIED;
+
+  const hit = childClassificationCache.get(c);
 
   if (isSpacerNode(c)) {
-    return { kind: "spacer", lines: c.lines };
+    if (hit && hit.tag === "spacer" && hit.lines === c.lines) {
+      return hit.out;
+    }
+    const out: ClassifiedChatChild = { kind: "spacer", lines: c.lines };
+    childClassificationCache.set(c, { tag: "spacer", lines: c.lines, out });
+    return out;
   }
 
   if (isAssistantMessageComponent(c)) {
@@ -279,6 +354,32 @@ export function classifyChatChild(c: unknown): ClassifiedChatChild {
     const msg = amc.lastMessage;
     const isStreaming = Boolean(amc.isStreaming);
     const content = Array.isArray(msg?.content) ? msg.content : [];
+    const contentLen = content.length;
+    const lastBlock = contentLen > 0 ? content[contentLen - 1] : undefined;
+    const stopReason = msg?.stopReason;
+    const state = getState();
+    const msgTs = msg?.timestamp;
+    const amcTs = amc.timestamp;
+    const liveThinkEndMs =
+      typeof msgTs === "number" ? state.thinkingEndByTimestamp.get(msgTs) : undefined;
+    const liveMsgEndMs =
+      typeof msgTs === "number" ? state.messageEndByTimestamp.get(msgTs) : undefined;
+
+    if (
+      hit &&
+      hit.tag === "amc" &&
+      hit.isStreaming === isStreaming &&
+      hit.lastMessage === msg &&
+      hit.contentLen === contentLen &&
+      hit.lastBlock === lastBlock &&
+      hit.stopReason === stopReason &&
+      hit.msgTs === msgTs &&
+      hit.amcTs === amcTs &&
+      hit.liveThinkEndMs === liveThinkEndMs &&
+      hit.liveMsgEndMs === liveMsgEndMs
+    ) {
+      return hit.out;
+    }
 
     const firstTextIdx = content.findIndex(
       (b) => b?.type === "text" && typeof b.text === "string" && b.text.trim().length > 0,
@@ -286,7 +387,7 @@ export function classifyChatChild(c: unknown): ClassifiedChatChild {
     const hasProse = firstTextIdx >= 0;
 
     const thinkingIdxs: number[] = [];
-    for (let i = 0; i < content.length; i++) {
+    for (let i = 0; i < contentLen; i++) {
       const b = content[i];
       if (
         b?.type === "thinking" &&
@@ -302,23 +403,16 @@ export function classifyChatChild(c: unknown): ClassifiedChatChild {
     const hasStandaloneError =
       !hasToolCalls &&
       !hasThinking &&
-      (msg?.stopReason === "aborted" ||
-        msg?.stopReason === "error" ||
-        msg?.stopReason === "length");
+      (stopReason === "aborted" || stopReason === "error" || stopReason === "length");
 
-    const state = getState();
-    const msgTs = msg?.timestamp;
     const msgStartMs = extractEpochMs(msgTs);
-    const entryEndMs = extractEpochMs(amc.timestamp);
-    const liveThinkEndMs =
-      typeof msgTs === "number" ? state.thinkingEndByTimestamp.get(msgTs) : undefined;
-    const liveMsgEndMs =
-      typeof msgTs === "number" ? state.messageEndByTimestamp.get(msgTs) : undefined;
+    const entryEndMs = extractEpochMs(amcTs);
 
+    let out: ClassifiedChatChild;
     if (hasProse) {
       const hasLeadingThinking =
         hasThinking && thinkingIdxs.every((idx) => idx < firstTextIdx);
-      return {
+      out = {
         kind: "prose",
         child: c,
         hasLeadingThinking,
@@ -326,63 +420,112 @@ export function classifyChatChild(c: unknown): ClassifiedChatChild {
         startMs: msgStartMs,
         thinkingEndMs: liveThinkEndMs ?? entryEndMs ?? msgStartMs,
       };
+    } else if (isStreaming) {
+      out = ACTIVE_CLASSIFIED;
+    } else if (hasStandaloneError) {
+      out = { kind: "closer", child: c };
+    } else {
+      const startMs = msgStartMs ?? entryEndMs;
+      const endMs = entryEndMs ?? liveMsgEndMs ?? liveThinkEndMs ?? msgStartMs;
+      out = hasThinking
+        ? { kind: "thought", child: c, timestamp: msgTs, startMs, endMs }
+        : { kind: "transparent", child: c, startMs, endMs };
     }
 
-    if (isStreaming) {
-      return { kind: "active" };
-    }
-
-    if (hasStandaloneError) {
-      return { kind: "closer", child: c };
-    }
-
-    const startMs = msgStartMs ?? entryEndMs;
-    const endMs = entryEndMs ?? liveMsgEndMs ?? liveThinkEndMs ?? msgStartMs;
-
-    if (hasThinking) {
-      return {
-        kind: "thought",
-        child: c,
-        timestamp: msgTs,
-        startMs,
-        endMs,
-      };
-    }
-
-    // Empty toolCall-only assistant wrapper (renders 0 lines).
-    return { kind: "transparent", child: c, startMs, endMs };
+    childClassificationCache.set(c, {
+      tag: "amc",
+      isStreaming,
+      lastMessage: msg,
+      contentLen,
+      lastBlock,
+      stopReason,
+      msgTs,
+      amcTs,
+      liveThinkEndMs,
+      liveMsgEndMs,
+      out,
+    });
+    return out;
   }
 
   if (isToolNode(c)) {
-    if (isToolRunningLike(c)) {
-      return { kind: "active" };
-    }
-    const durationMs = extractExplicitToolDurationMs(c.toolName, c.result);
+    const running = isToolRunningLike(c);
     const rec = c as unknown as Record<symbol, unknown>;
-    const liveStartMs = extractEpochMs(rec[TOOL_STARTED_AT_KEY]);
-    const finishMs =
-      extractEpochMs(c.result?.timestamp) ?? extractEpochMs(rec[TOOL_FINISHED_AT_KEY]);
-    const derivedStartMs =
-      finishMs !== undefined && durationMs !== undefined
-        ? finishMs - durationMs
-        : undefined;
-    const startMs = liveStartMs ?? derivedStartMs ?? finishMs;
-    const endMs =
-      finishMs ??
-      (liveStartMs !== undefined && durationMs !== undefined
-        ? liveStartMs + durationMs
-        : liveStartMs);
-    return {
-      kind: "tool",
-      child: c,
+    const startedAt = rec[TOOL_STARTED_AT_KEY];
+    const finishedAt = rec[TOOL_FINISHED_AT_KEY];
+    const res = c.result;
+    const resTs = res?.timestamp;
+    const resDur = res?.durationMs;
+    const resErr = res?.isError;
+    const resDetails = res?.details;
+    const resContent = res?.content;
+
+    if (
+      hit &&
+      hit.tag === "tool" &&
+      hit.running === running &&
+      hit.toolName === c.toolName &&
+      hit.args === c.args &&
+      hit.result === res &&
+      hit.cwd === c.cwd &&
+      hit.startedAt === startedAt &&
+      hit.finishedAt === finishedAt &&
+      hit.resTs === resTs &&
+      hit.resDur === resDur &&
+      hit.resErr === resErr &&
+      hit.resDetails === resDetails &&
+      hit.resContent === resContent
+    ) {
+      return hit.out;
+    }
+
+    let out: ClassifiedChatChild;
+    if (running) {
+      out = ACTIVE_CLASSIFIED;
+    } else {
+      const durationMs = extractExplicitToolDurationMs(c.toolName, res);
+      const liveStartMs = extractEpochMs(startedAt);
+      const finishMs = extractEpochMs(resTs) ?? extractEpochMs(finishedAt);
+      const derivedStartMs =
+        finishMs !== undefined && durationMs !== undefined
+          ? finishMs - durationMs
+          : undefined;
+      const startMs = liveStartMs ?? derivedStartMs ?? finishMs;
+      const endMs =
+        finishMs ??
+        (liveStartMs !== undefined && durationMs !== undefined
+          ? liveStartMs + durationMs
+          : liveStartMs);
+      out = {
+        kind: "tool",
+        child: c,
+        toolName: c.toolName,
+        args: c.args,
+        result: res,
+        cwd: c.cwd,
+        startMs,
+        endMs,
+        durationMs,
+      };
+    }
+
+    childClassificationCache.set(c, {
+      tag: "tool",
+      running,
       toolName: c.toolName,
       args: c.args,
-      result: c.result,
+      result: res,
       cwd: c.cwd,
-      startMs,
-      endMs,
-      durationMs,
-    };
+      startedAt,
+      finishedAt,
+      resTs,
+      resDur,
+      resErr,
+      resDetails,
+      resContent,
+      out,
+    });
+    return out;
   }
 
   if (isCustomChromeComponent(c)) {
@@ -392,21 +535,53 @@ export function classifyChatChild(c: unknown): ClassifiedChatChild {
       message?: { timestamp?: unknown };
       entry?: { timestamp?: unknown };
     };
-    if (typeof custom.hasContent === "function" && !custom.hasContent()) {
-      return { kind: "transparent", child: c };
+    const hasContent =
+      typeof custom.hasContent === "function" ? Boolean(custom.hasContent()) : true;
+    const msg = custom.message;
+    const entry = custom.entry;
+    const ts = custom.timestamp;
+    const msgTs = msg?.timestamp;
+    const entryTs = entry?.timestamp;
+
+    if (
+      hit &&
+      hit.tag === "custom" &&
+      hit.hasContent === hasContent &&
+      hit.msg === msg &&
+      hit.entry === entry &&
+      hit.ts === ts &&
+      hit.msgTs === msgTs &&
+      hit.entryTs === entryTs
+    ) {
+      return hit.out;
     }
+
     const tsMs =
-      extractEpochMs(custom.message?.timestamp) ??
-      extractEpochMs(custom.timestamp) ??
-      extractEpochMs(custom.entry?.timestamp);
-    return { kind: "custom", child: c, startMs: tsMs, endMs: tsMs };
+      extractEpochMs(msgTs) ?? extractEpochMs(ts) ?? extractEpochMs(entryTs);
+    const out: ClassifiedChatChild = hasContent
+      ? { kind: "custom", child: c, startMs: tsMs, endMs: tsMs }
+      : { kind: "transparent", child: c };
+    childClassificationCache.set(c, {
+      tag: "custom",
+      hasContent,
+      msg,
+      entry,
+      ts,
+      msgTs,
+      entryTs,
+      out,
+    });
+    return out;
   }
 
-  if (isNonProseTurnCloserComponent(c)) {
-    return { kind: "closer", child: c };
+  if (hit && hit.tag === "static") {
+    return hit.out;
   }
-
-  return { kind: "boundary" };
+  const out: ClassifiedChatChild = isNonProseTurnCloserComponent(c)
+    ? { kind: "closer", child: c }
+    : BOUNDARY_CLASSIFIED;
+  childClassificationCache.set(c, { tag: "static", out });
+  return out;
 }
 
 function needsLeadBlankBeforeIndex(
@@ -467,8 +642,10 @@ function isRealWorkItem(item: ClassifiedChatChild): boolean {
   return item.kind === "thought" || item.kind === "tool" || item.kind === "custom";
 }
 
-export function scanChatWorkRollups(children: readonly unknown[]): WorkRollupScan {
-  const classified = children.map(classifyChatChild);
+function buildWorkRollupScan(
+  children: readonly unknown[],
+  classified: readonly ClassifiedChatChild[],
+): WorkRollupScan {
   const segments: WorkRollupSegment[] = [];
   const byStartIndex = new Map<number, WorkRollupSegment>();
   const byProseChild = new Map<object, WorkRollupSegment>();
@@ -559,6 +736,127 @@ export function scanChatWorkRollups(children: readonly unknown[]): WorkRollupSca
   }
 
   return { segments, byStartIndex, byProseChild, byCloserChild, byFirstChild };
+}
+
+export function scanChatWorkRollups(children: readonly unknown[]): WorkRollupScan {
+  const classified = new Array<ClassifiedChatChild>(children.length);
+  for (let i = 0; i < children.length; i++) {
+    classified[i] = classifyChatChild(children[i]);
+  }
+  return buildWorkRollupScan(children, classified);
+}
+
+interface CachedContainerScan {
+  layoutVersion: number;
+  toolViewMode: string;
+  globalExpanded: boolean;
+  len: number;
+  first: unknown;
+  last: unknown;
+  childrenSnap: unknown[];
+  classifiedSnap: ClassifiedChatChild[];
+  activeIndices: number[];
+  scan: WorkRollupScan;
+}
+
+const containerScanCache = new WeakMap<object, CachedContainerScan>();
+
+function getOrBuildContainerScan(container: { children?: unknown[] }): WorkRollupScan {
+  const children = container.children ?? [];
+  const len = children.length;
+  const state = getState();
+  const curVer = getChatLayoutVersion();
+  const first = len > 0 ? children[0] : undefined;
+  const last = len > 0 ? children[len - 1] : undefined;
+  const hit = containerScanCache.get(container);
+
+  if (
+    hit &&
+    hit.layoutVersion === curVer &&
+    hit.toolViewMode === state.toolViewMode &&
+    hit.globalExpanded === state.globalExpanded &&
+    hit.len === len &&
+    hit.first === first &&
+    hit.last === last
+  ) {
+    let tailOk = true;
+    for (let i = 0; i < hit.activeIndices.length; i++) {
+      const idx = hit.activeIndices[i]!;
+      if (
+        idx >= len ||
+        children[idx] !== hit.childrenSnap[idx] ||
+        classifyChatChild(children[idx]) !== hit.classifiedSnap[idx]
+      ) {
+        tailOk = false;
+        break;
+      }
+    }
+    if (tailOk) {
+      const tailStart = Math.max(0, len - 4);
+      for (let idx = tailStart; idx < len; idx++) {
+        if (
+          children[idx] !== hit.childrenSnap[idx] ||
+          classifyChatChild(children[idx]) !== hit.classifiedSnap[idx]
+        ) {
+          tailOk = false;
+          break;
+        }
+      }
+    }
+    if (tailOk) {
+      return hit.scan;
+    }
+  }
+
+  const classified = new Array<ClassifiedChatChild>(len);
+  const activeIndices: number[] = [];
+  let allSameAsHit = Boolean(hit && hit.len === len);
+  for (let i = 0; i < len; i++) {
+    const child = children[i];
+    const item = classifyChatChild(child);
+    classified[i] = item;
+    if (item.kind === "active") {
+      activeIndices.push(i);
+    }
+    if (
+      allSameAsHit &&
+      (child !== hit!.childrenSnap[i] || item !== hit!.classifiedSnap[i])
+    ) {
+      allSameAsHit = false;
+    }
+  }
+
+  if (allSameAsHit && hit) {
+    let leadBlanksMatch = true;
+    for (let s = 0; s < hit.scan.segments.length; s++) {
+      const seg = hit.scan.segments[s]!;
+      if (needsLeadBlankBeforeIndex(children, classified, seg.startIndex) !== seg.leadBlank) {
+        leadBlanksMatch = false;
+        break;
+      }
+    }
+    if (leadBlanksMatch) {
+      hit.layoutVersion = curVer;
+      hit.toolViewMode = state.toolViewMode;
+      hit.globalExpanded = state.globalExpanded;
+      return hit.scan;
+    }
+  }
+
+  const scan = buildWorkRollupScan(children, classified);
+  containerScanCache.set(container, {
+    layoutVersion: curVer,
+    toolViewMode: state.toolViewMode,
+    globalExpanded: state.globalExpanded,
+    len,
+    first,
+    last,
+    childrenSnap: children.slice(),
+    classifiedSnap: classified,
+    activeIndices,
+    scan,
+  });
+  return scan;
 }
 
 function computeSegmentDurationMs(seg: WorkRollupSegment): number | undefined {
@@ -768,6 +1066,50 @@ export function summarizeWorkRollup(seg: WorkRollupSegment): WorkRollupSummary {
   };
 }
 
+interface CachedCloserSummary {
+  itemsLen: number;
+  firstItem: ClassifiedChatChild | undefined;
+  lastItem: ClassifiedChatChild | undefined;
+  absorbs: boolean;
+  proseStartMs: number | undefined;
+  proseThinkingEndMs: number | undefined;
+  summary: WorkRollupSummary;
+}
+
+const closerSummaryCache = new WeakMap<object, CachedCloserSummary>();
+
+function getSegmentSummary(seg: WorkRollupSegment): WorkRollupSummary {
+  if (seg._summary) return seg._summary;
+  const itemsLen = seg.items.length;
+  const firstItem = itemsLen > 0 ? seg.items[0] : undefined;
+  const lastItem = itemsLen > 0 ? seg.items[itemsLen - 1] : undefined;
+  const hit = closerSummaryCache.get(seg.closerChild);
+  if (
+    hit &&
+    hit.itemsLen === itemsLen &&
+    hit.firstItem === firstItem &&
+    hit.lastItem === lastItem &&
+    hit.absorbs === seg.absorbsProseLeadingThinking &&
+    hit.proseStartMs === seg.proseStartMs &&
+    hit.proseThinkingEndMs === seg.proseThinkingEndMs
+  ) {
+    seg._summary = hit.summary;
+    return hit.summary;
+  }
+  const summary = summarizeWorkRollup(seg);
+  seg._summary = summary;
+  closerSummaryCache.set(seg.closerChild, {
+    itemsLen,
+    firstItem,
+    lastItem,
+    absorbs: seg.absorbsProseLeadingThinking,
+    proseStartMs: seg.proseStartMs,
+    proseThinkingEndMs: seg.proseThinkingEndMs,
+    summary,
+  });
+  return summary;
+}
+
 export function rollupFoldId(closerTarget: object): string {
   return `${idForTarget(closerTarget)}:r`;
 }
@@ -829,7 +1171,7 @@ function getScanForParent(parent: { children?: unknown[] } | null): WorkRollupSc
     | WorkRollupScan
     | undefined;
   if (passCached) return passCached;
-  return scanChatWorkRollups(parent.children);
+  return getOrBuildContainerScan(parent);
 }
 
 function hasOpenRollupHeaderAbove(node: unknown): boolean {
@@ -899,7 +1241,34 @@ export async function installWorkRollupPatch(): Promise<() => void> {
 
   const prevRender = proto.render;
   const headerCache = new WeakMap<object, RollupHeaderCache>();
-  const wasUnderOpenHeader = new WeakMap<object, boolean>();
+  const onClickCache = new WeakMap<object, () => void>();
+  const openHeaderFirstChildren = new Set<object>();
+
+  interface ChatFrameCache {
+    width: number;
+    modeKey: number;
+    slotKeys: unknown[];
+    slotOutputs: Array<readonly string[]>;
+    slotLineOffsets: number[];
+    lines: string[];
+    mouseLayout: {
+      width: number;
+      children: Array<{ component: unknown; height: number }>;
+    };
+  }
+  const chatFrameCache = new WeakMap<object, ChatFrameCache>();
+
+  const renderChildFast = (child: RenderableChild | undefined, width: number): string[] => {
+    if (!child) return EMPTY_LINES as string[];
+    if (
+      child.constructor === Spacer &&
+      typeof (child as unknown as { lines?: unknown }).lines === "number" &&
+      !Object.hasOwn(child, "render")
+    ) {
+      return spacerLinesArray((child as unknown as { lines: number }).lines);
+    }
+    return child.render(width);
+  };
 
   setWorkRollupHooks({
     hasOpenRollupHeaderAbove,
@@ -907,20 +1276,28 @@ export async function installWorkRollupPatch(): Promise<() => void> {
   });
   getState().workRollupInstalled = true;
 
-  const renderRollupHeaderLines = (seg: WorkRollupSegment, width: number): string[] => {
-    const id = rollupFoldId(seg.closerChild);
-    const onClick = () => {
-      toggleWorkRollupAt(seg.closerChild);
-    };
+  const renderRollupHeaderLines = (
+    seg: WorkRollupSegment,
+    width: number,
+    themeSample: string,
+  ): string[] => {
+    const id = (seg._foldId ??= rollupFoldId(seg.closerChild));
+    let onClick = onClickCache.get(seg.closerChild);
+    if (!onClick) {
+      const target = seg.closerChild;
+      onClick = () => {
+        toggleWorkRollupAt(target);
+      };
+      onClickCache.set(target, onClick);
+    }
     registerFoldHandler(id, onClick);
 
-    const summary = summarizeWorkRollup(seg);
+    const summary = getSegmentSummary(seg);
     const state = getState();
     const hovered =
       state.tuiMode === "fullscreen" &&
       state.clickFoldReady &&
       state.hoveredFoldId === id;
-    const themeSample = theme.fg("muted", "m");
 
     const hit = headerCache.get(seg.closerChild);
     if (
@@ -971,6 +1348,85 @@ export async function installWorkRollupPatch(): Promise<() => void> {
     return lines;
   };
 
+  const assembleOrReuseFrame = (
+    container: typeof proto,
+    width: number,
+    modeKey: number,
+    slotKeys: unknown[],
+    slotOutputs: Array<readonly string[]>,
+    buildMouseChildren: () => Array<{ component: unknown; height: number }>,
+  ): string[] => {
+    const prev = chatFrameCache.get(container);
+    const slotCount = slotOutputs.length;
+    if (
+      prev &&
+      prev.width === width &&
+      prev.modeKey === modeKey &&
+      prev.slotKeys.length === slotCount
+    ) {
+      let keysAndHeightsMatch = true;
+      const changedSlots: number[] = [];
+      for (let s = 0; s < slotCount; s++) {
+        if (prev.slotKeys[s] !== slotKeys[s]) {
+          keysAndHeightsMatch = false;
+          break;
+        }
+        const curOut = slotOutputs[s]!;
+        const prevOut = prev.slotOutputs[s]!;
+        if (curOut !== prevOut) {
+          if (curOut.length !== prevOut.length) {
+            keysAndHeightsMatch = false;
+            break;
+          }
+          changedSlots.push(s);
+        }
+      }
+
+      if (keysAndHeightsMatch) {
+        if (changedSlots.length === 0) {
+          container.mouseLayout = prev.mouseLayout;
+          return prev.lines;
+        }
+        // Same slot heights (e.g. hover highlight moved between rows): patch changed slices in O(changedLines)
+        const nextLines = prev.lines.slice();
+        for (let c = 0; c < changedSlots.length; c++) {
+          const s = changedSlots[c]!;
+          const offset = prev.slotLineOffsets[s]!;
+          const curOut = slotOutputs[s]!;
+          for (let j = 0; j < curOut.length; j++) {
+            nextLines[offset + j] = curOut[j]!;
+          }
+        }
+        prev.slotOutputs = slotOutputs;
+        prev.lines = nextLines;
+        container.mouseLayout = prev.mouseLayout;
+        return nextLines;
+      }
+    }
+
+    const slotLineOffsets = new Array<number>(slotCount);
+    const lines: string[] = [];
+    for (let s = 0; s < slotCount; s++) {
+      slotLineOffsets[s] = lines.length;
+      const out = slotOutputs[s]!;
+      for (let j = 0; j < out.length; j++) {
+        lines.push(out[j]!);
+      }
+    }
+    const mouseLayout = { width, children: buildMouseChildren() };
+    container.mouseLayout = mouseLayout;
+    chatFrameCache.set(container, {
+      width,
+      modeKey,
+      slotKeys,
+      slotOutputs,
+      slotLineOffsets,
+      lines,
+      mouseLayout,
+    });
+    return lines;
+  };
+
   proto.render = function (this: typeof proto, width: number): string[] {
     if (
       this.constructor !== Container ||
@@ -980,91 +1436,143 @@ export async function installWorkRollupPatch(): Promise<() => void> {
       return prevRender.call(this, width);
     }
 
-    let hasChatTurn = false;
-    for (const c of this.children) {
-      if (isAssistantMessageComponent(c) || isUserMessageComponent(c)) {
-        hasChatTurn = true;
-        break;
-      }
-    }
-    if (!hasChatTurn) {
+    if (!isChatContainer(this)) {
       return prevRender.call(this, width);
     }
+
+    const children = this.children;
 
     if (!isRollupModeActive()) {
       (this as unknown as Record<symbol, unknown>)[ROLLUP_PASS_KEY] = undefined;
-      for (const c of this.children) {
-        if (c && typeof c === "object" && wasUnderOpenHeader.get(c) === true) {
-          wasUnderOpenHeader.delete(c);
-          relayoutChild(c);
+      if (openHeaderFirstChildren.size > 0) {
+        for (const c of children) {
+          if (c && typeof c === "object" && openHeaderFirstChildren.delete(c)) {
+            relayoutChild(c);
+          }
         }
       }
-      return prevRender.call(this, width);
+      const n = children.length;
+      const slotKeys = new Array<unknown>(n);
+      const slotOutputs = new Array<readonly string[]>(n);
+      for (let i = 0; i < n; i++) {
+        const child = children[i] as RenderableChild | undefined;
+        slotKeys[i] = child;
+        slotOutputs[i] = renderChildFast(child, width);
+      }
+      return assembleOrReuseFrame(this, width, 0, slotKeys, slotOutputs, () => {
+        const mouseChildren = new Array<{ component: unknown; height: number }>(n);
+        for (let i = 0; i < n; i++) {
+          mouseChildren[i] = { component: children[i], height: slotOutputs[i]!.length };
+        }
+        return mouseChildren;
+      });
     }
 
-    ensureContainerStamped(this);
-    const scan = scanChatWorkRollups(this.children);
+    const scan = getOrBuildContainerScan(this);
     if (scan.segments.length === 0) {
       (this as unknown as Record<symbol, unknown>)[ROLLUP_PASS_KEY] = undefined;
-      return prevRender.call(this, width);
+      const n = children.length;
+      const slotKeys = new Array<unknown>(n);
+      const slotOutputs = new Array<readonly string[]>(n);
+      for (let i = 0; i < n; i++) {
+        const child = children[i] as RenderableChild | undefined;
+        slotKeys[i] = child;
+        slotOutputs[i] = renderChildFast(child, width);
+      }
+      return assembleOrReuseFrame(this, width, 0, slotKeys, slotOutputs, () => {
+        const mouseChildren = new Array<{ component: unknown; height: number }>(n);
+        for (let i = 0; i < n; i++) {
+          mouseChildren[i] = { component: children[i], height: slotOutputs[i]!.length };
+        }
+        return mouseChildren;
+      });
     }
 
     (this as unknown as Record<symbol, unknown>)[ROLLUP_PASS_KEY] = scan;
     try {
-      const lines: string[] = [];
-      const mouseChildren: Array<{ component: unknown; height: number }> = [];
+      const passThemeSample = theme.fg("muted", "m");
+      const slotKeys: unknown[] = [];
+      const slotOutputs: Array<readonly string[]> = [];
 
       let i = 0;
-      while (i < this.children.length) {
+      while (i < children.length) {
         const seg = scan.byStartIndex.get(i);
         if (!seg) {
-          const child = this.children[i] as RenderableChild | undefined;
-          if (child && typeof child === "object" && wasUnderOpenHeader.get(child) === true) {
-            wasUnderOpenHeader.delete(child);
+          const child = children[i] as RenderableChild | undefined;
+          if (child && typeof child === "object" && openHeaderFirstChildren.delete(child)) {
             relayoutChild(child);
           }
-          const childLines = child ? child.render(width) : [];
-          mouseChildren.push({ component: child, height: childLines.length });
-          for (const line of childLines) lines.push(line);
+          const childLines = renderChildFast(child, width);
+          slotKeys.push(child);
+          slotOutputs.push(childLines);
           i += 1;
           continue;
         }
 
         const open = ensureRollupSeeded(seg);
-        const headerLines = renderRollupHeaderLines(seg, width);
-        mouseChildren.push({
-          component: NOOP_MOUSE_COMPONENT,
-          height: headerLines.length,
-        });
-        for (const line of headerLines) lines.push(line);
+        const headerLines = renderRollupHeaderLines(seg, width, passThemeSample);
+        // Distinct key per (closerChild, open) so open<->collapsed always invalidates mouseLayout
+        slotKeys.push(open ? seg : seg.closerChild);
+        slotOutputs.push(headerLines);
 
         if (!open) {
-          if (wasUnderOpenHeader.get(seg.firstWorkChild) === true) {
-            wasUnderOpenHeader.set(seg.firstWorkChild, false);
-          }
-          for (let k = seg.startIndex; k <= seg.endIndex; k++) {
-            mouseChildren.push({ component: this.children[k], height: 0 });
-          }
+          openHeaderFirstChildren.delete(seg.firstWorkChild);
           i = seg.endIndex + 1;
           continue;
         }
 
-        if (wasUnderOpenHeader.get(seg.firstWorkChild) !== true) {
-          wasUnderOpenHeader.set(seg.firstWorkChild, true);
+        if (!openHeaderFirstChildren.has(seg.firstWorkChild)) {
+          openHeaderFirstChildren.add(seg.firstWorkChild);
           relayoutChild(seg.firstWorkChild);
         }
 
         for (let k = seg.startIndex; k <= seg.endIndex; k++) {
-          const child = this.children[k] as RenderableChild | undefined;
-          const childLines = child ? child.render(width) : [];
-          mouseChildren.push({ component: child, height: childLines.length });
-          for (const line of childLines) lines.push(line);
+          const child = children[k] as RenderableChild | undefined;
+          const childLines = renderChildFast(child, width);
+          slotKeys.push(child);
+          slotOutputs.push(childLines);
         }
         i = seg.endIndex + 1;
       }
 
-      this.mouseLayout = { width, children: mouseChildren };
-      return lines;
+      return assembleOrReuseFrame(this, width, 1, slotKeys, slotOutputs, () => {
+        const mouseChildren: Array<{ component: unknown; height: number }> = [];
+        let cursor = 0;
+        let slotIdx = 0;
+        while (cursor < children.length) {
+          const seg = scan.byStartIndex.get(cursor);
+          if (!seg) {
+            mouseChildren.push({
+              component: children[cursor],
+              height: slotOutputs[slotIdx]!.length,
+            });
+            slotIdx += 1;
+            cursor += 1;
+            continue;
+          }
+          const open = slotKeys[slotIdx] === seg;
+          mouseChildren.push({
+            component: NOOP_MOUSE_COMPONENT,
+            height: slotOutputs[slotIdx]!.length,
+          });
+          slotIdx += 1;
+          if (!open) {
+            for (let k = seg.startIndex; k <= seg.endIndex; k++) {
+              mouseChildren.push({ component: children[k], height: 0 });
+            }
+          } else {
+            for (let k = seg.startIndex; k <= seg.endIndex; k++) {
+              mouseChildren.push({
+                component: children[k],
+                height: slotOutputs[slotIdx]!.length,
+              });
+              slotIdx += 1;
+            }
+          }
+          cursor = seg.endIndex + 1;
+        }
+        return mouseChildren;
+      });
     } finally {
       (this as unknown as Record<symbol, unknown>)[ROLLUP_PASS_KEY] = undefined;
     }

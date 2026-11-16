@@ -196,23 +196,47 @@ export function collapsibleRun(
     header: self as CollapsibleTool,
     isHeader: true,
   };
-  if (!self || typeof self.toolName !== "string") return fallback;
-  const classified = siblings.map(classifySibling);
-  const range = groupRunRange(
-    classified,
-    index,
-    getToolViewMode() === "chrome",
-  );
-  if (!range) return fallback;
+  if (
+    !self ||
+    typeof self.toolName !== "string" ||
+    getToolViewMode() !== "chrome" ||
+    !isGroupableTool(self.toolName)
+  ) {
+    return fallback;
+  }
+  const selfKind = classifySibling(self);
+  if (selfKind.kind !== "tool" || !isGroupableTool(selfKind.toolName)) {
+    return fallback;
+  }
+
+  let start = index;
+  while (start > 0) {
+    const prev = classifySibling(siblings[start - 1]);
+    if (prev.kind === "gap" || (prev.kind === "tool" && isGroupableTool(prev.toolName))) {
+      start -= 1;
+      continue;
+    }
+    break;
+  }
+  let end = index;
+  while (end + 1 < siblings.length) {
+    const next = classifySibling(siblings[end + 1]);
+    if (next.kind === "gap" || (next.kind === "tool" && isGroupableTool(next.toolName))) {
+      end += 1;
+      continue;
+    }
+    break;
+  }
+
   const members: CollapsibleTool[] = [];
-  for (let i = range.start; i <= range.end; i++) {
+  for (let i = start; i <= end; i++) {
     const c = siblings[i];
-    const kind = classified[i];
-    if (kind?.kind === "tool" && isGroupableTool(kind.toolName)) {
+    const kind = classifySibling(c);
+    if (kind.kind === "tool" && isGroupableTool(kind.toolName)) {
       members.push(c as CollapsibleTool);
     }
   }
-  if (members.length === 0) return fallback;
+  if (members.length < 2) return fallback;
   return {
     members,
     header: members[0]!,

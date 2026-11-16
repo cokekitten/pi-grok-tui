@@ -28,6 +28,7 @@ import {
   relayoutChild,
   shouldGapBefore,
 } from "./parent-stamp.js";
+import { bumpChatLayoutVersion } from "./state.js";
 import {
   clickableChromeChild,
   effectiveToolMode,
@@ -62,6 +63,7 @@ interface RenderCache {
   width: number;
   lead: number;
   mainLines: readonly string[];
+  mouseLayout: unknown;
   out: string[];
 }
 
@@ -407,16 +409,6 @@ function renderManagedCustom(
   }
   const lead = spacer.lines;
   const mainLines = main.render(width);
-  if (lead <= 0) {
-    self.mouseLayout = {
-      width,
-      children: [
-        { component: spacer, height: 0 },
-        { component: main, height: mainLines.length },
-      ],
-    };
-    return mainLines;
-  }
   const hit = self[RENDER_CACHE_KEY];
   if (
     hit &&
@@ -424,26 +416,25 @@ function renderManagedCustom(
     hit.lead === lead &&
     hit.mainLines === mainLines
   ) {
-    self.mouseLayout = {
-      width,
-      children: [
-        { component: spacer, height: lead },
-        { component: main, height: mainLines.length },
-      ],
-    };
+    self.mouseLayout = hit.mouseLayout;
     return hit.out;
+  }
+  const mouseLayout = {
+    width,
+    children: [
+      { component: spacer, height: Math.max(0, lead) },
+      { component: main, height: mainLines.length },
+    ],
+  };
+  self.mouseLayout = mouseLayout;
+  if (lead <= 0) {
+    self[RENDER_CACHE_KEY] = { width, lead, mainLines, mouseLayout, out: mainLines };
+    return mainLines;
   }
   const out: string[] = [];
   for (let i = 0; i < lead; i++) out.push("");
   for (const line of mainLines) out.push(line);
-  self[RENDER_CACHE_KEY] = { width, lead, mainLines, out };
-  self.mouseLayout = {
-    width,
-    children: [
-      { component: spacer, height: lead },
-      { component: main, height: mainLines.length },
-    ],
-  };
+  self[RENDER_CACHE_KEY] = { width, lead, mainLines, mouseLayout, out };
   return out;
 }
 
@@ -521,6 +512,8 @@ export async function installCustomMessageCollapsePatch(): Promise<() => void> {
 
   msgProto.rebuild = function (this: CustomMessageProto) {
     this[PATCHED_GEN] = generation;
+    this[RENDER_CACHE_KEY] = undefined;
+    bumpChatLayoutVersion();
     const prevExpanded = this._expanded;
     try {
       const mode = effectiveToolMode(this, "custom");
@@ -607,6 +600,8 @@ export async function installCustomMessageCollapsePatch(): Promise<() => void> {
 
     entryProto.rebuild = function (this: CustomEntryProto) {
       this[PATCHED_GEN] = generation;
+      this[RENDER_CACHE_KEY] = undefined;
+      bumpChatLayoutVersion();
       const prevExpanded = this._expanded;
       try {
         const mode = effectiveToolMode(this, "custom");

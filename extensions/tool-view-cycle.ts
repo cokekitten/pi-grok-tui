@@ -183,9 +183,9 @@ export async function installToolViewCyclePatch(): Promise<() => void> {
     if (expanded && currentMode === "full" && Boolean(this.toolOutputExpanded)) {
       return;
     }
-    clearToolFoldOverrides();
     const stateMode: ToolViewMode = expanded ? "full" : "chrome";
     getState().toolViewMode = stateMode;
+    clearToolFoldOverrides();
     applyToolViewMode(this, stateMode);
   };
 
