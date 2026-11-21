@@ -76,14 +76,30 @@ export function stripRedundantSessionCd(command: string, cwd?: string): string {
   return remainder;
 }
 
-function titleCaseToolName(name: string): string {
-  if (!name) return "Tool";
-  const base = name.includes("__") ? name.split("__").pop()! : name;
-  return base
-    .split(/[-_]/)
+function titleCaseWords(value: string): string {
+  return value
+    .split(/[-_.\s]+/)
     .filter(Boolean)
     .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
     .join(" ");
+}
+
+/**
+ * MCP tools are named `mcp__<server>__<tool>` (or `<server>__<tool>`).
+ * Keep the server: collapsing `mcp__browse__execute` to just the last
+ * segment turned every browse MCP row into a bare "Execute".
+ */
+function titleCaseToolName(name: string): string {
+  if (!name) return "Tool";
+  const parts = name.split("__").filter(Boolean);
+  if (parts.length >= 2) {
+    const toolLabel = titleCaseWords(parts[parts.length - 1]!);
+    const server = parts[parts.length - 2]!;
+    if (server === "mcp") return toolLabel;
+    const serverLabel = titleCaseWords(server);
+    return serverLabel ? `${serverLabel} · ${toolLabel}` : toolLabel;
+  }
+  return titleCaseWords(name);
 }
 
 /** Map pi tool name → Grok-like verb bucket. */
@@ -255,6 +271,16 @@ export function formatToolTitle(
         str(a.url) ??
         str(a.pattern) ??
         str(a.command) ??
+        // MCP / integration tools: browse `execute`, page `eval`, click/fill
+        // style tools and anything else that drives work through a code blob
+        // or an element reference.
+        str(a.code) ??
+        str(a.script) ??
+        str(a.js) ??
+        str(a.expression) ??
+        str(a.ref) ??
+        str(a.selector) ??
+        str(a.text) ??
         str(a.tool_name);
       if (preview) {
         return `${label} \`${truncateChars(preview, 48)}\``;

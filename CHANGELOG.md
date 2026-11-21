@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.11] - 2026-11-21
+
+### Fixed
+
+- Keep the MCP server in collapsed tool titles instead of showing only the last name segment: `mcp__browse__execute` rendered as a bare `Execute` (once as the `codemode` header and again as the tree row `└ ✓ Execute 24ms`, so a browse-driven `codemode` row looked like it had no details at all). MCP names now title-case as `<Server> · <Tool>` (`Browse · Execute`, `Browse · Click`; a two-part `mcp__<server>` keeps just the server), and the fallback argument preview also reads `code`, `script`, `js`, `expression`, `ref`, `selector` and `text`, so page-driving tools show what they ran (`Browse · Execute \`await page.click('.x')\``) rather than a bare verb.
+
 ## [0.3.10] - 2026-11-16
 
 ### Fixed

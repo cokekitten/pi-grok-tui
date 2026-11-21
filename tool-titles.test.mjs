@@ -84,7 +84,42 @@ describe("formatToolTitle", () => {
 
   it("formats unknown / mcp with preview", () => {
     assert.equal(formatToolTitle("web_search", { query: "pi" }), "Web Search `pi`");
-    assert.equal(formatToolTitle("mcp__github__list_issues", { path: "x" }), "List Issues `x`");
+    assert.equal(
+      formatToolTitle("mcp__github__list_issues", { path: "x" }),
+      "Github · List Issues `x`",
+    );
+  });
+
+  it("keeps the MCP server in the title", () => {
+    assert.equal(formatToolTitle("mcp__browse__execute", {}), "Browse · Execute");
+    assert.equal(formatToolTitle("mcp__browse__click", {}), "Browse · Click");
+    assert.equal(formatToolTitle("mcp__browse", {}), "Browse");
+    assert.equal(formatToolTitle("mcp__browse__webmcp", {}), "Browse · Webmcp");
+  });
+
+  it("previews MCP code / element arguments instead of a bare verb", () => {
+    assert.equal(
+      formatToolTitle("mcp__browse__execute", {
+        code: "await page.click('.x')",
+        timeoutMs: 5000,
+        tab: "1079474953",
+      }),
+      "Browse · Execute `await page.click('.x')`",
+    );
+    assert.equal(
+      formatToolTitle("mcp__browse__fill", { ref: "e12", text: "hello" }),
+      "Browse · Fill `e12`",
+    );
+    assert.equal(
+      formatToolTitle("mcp__browse__click", { selector: ".submit" }),
+      "Browse · Click `.submit`",
+    );
+    // Multi-line code collapses to one line and truncates.
+    const title = formatToolTitle("mcp__browse__execute", {
+      code: "const tab = await pages.open();\nawait tab.goto('https://example.com/very/long/path')",
+    });
+    assert.equal(title.includes("\n"), false, title);
+    assert.ok(title.startsWith("Browse · Execute `"));
   });
 });
 

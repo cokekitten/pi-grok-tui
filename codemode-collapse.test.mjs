@@ -959,3 +959,57 @@ describe("Codemode Ctrl+O cycle & scroll render cache", () => {
     }
   });
 });
+
+describe("ToolExecutionComponent codemode MCP nested calls", () => {
+  it("keeps the MCP server and argument preview for browse execute instead of a bare 'Execute'", async () => {
+    const cleanups = [
+      installParentStamp(),
+      installFoldBodyTextPatch(),
+      await installToolCollapsePatch(),
+    ];
+    try {
+      resetFoldHandlers();
+      resetClickFoldSession();
+      Object.assign(getState(), {
+        toolViewMode: "chrome",
+        tuiMode: "fullscreen",
+        clickFoldReady: true,
+        hoveredFoldId: undefined,
+      });
+
+      const comp = new ToolExecutionComponent(
+        "codemode",
+        "cm-mcp",
+        { code: 'await tools.mcp__browse__execute({ code: "await page.click(\'.x\')", tab: "1079474953" });' },
+        {},
+        codemodeDef,
+        { requestRender() {} },
+        "/proj",
+      );
+      comp.updateResult(
+        {
+          content: [{ type: "text", text: "Script completed\nWall time 1.2 seconds\nOutput:\n" }],
+          details: {
+            calls: [
+              {
+                id: "m1",
+                name: "mcp__browse__execute",
+                args: '{"code":"await page.click(\'.x\')","timeoutMs":5000,"tab":"1079474953"}',
+                status: "ok",
+                durationMs: 24,
+              },
+            ],
+          },
+        },
+        false,
+      );
+
+      assert.deepEqual(
+        plainLines(comp).filter((l) => l.trim()).map((l) => l.trim()),
+        ["◆ Browse · Execute `await page.click('.x')`"],
+      );
+    } finally {
+      cleanups.reverse().forEach((fn) => fn());
+    }
+  });
+});
