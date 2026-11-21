@@ -976,7 +976,10 @@ describe("work-rollup: full chatContainer render, click-to-expand, spacing & mou
       );
       chat.addChild(cm2);
       assert.ok(plainLines(chat).some((l) => l.includes("const alpha = 42;")));
-      assert.ok(plainLines(chat).some((l) => l.includes("└─ ✓ Read `two.ts` 6ms")));
+      // cm2 is a single finished call mid-turn: one chrome line, no repeated
+      // tree row (the header already names it).
+      assert.ok(plainLines(chat).some((l) => l.includes("◆ Read `two.ts`")));
+      assert.ok(!plainLines(chat).some((l) => l.includes("└─ ✓ Read `two.ts`")));
 
       // Assistant finishes answering -> entire turn collapses into 1 rollup line!
       const prose = makeAssistant([{ type: "text", text: "回答完毕。" }], { timestamp: 8103 });

@@ -868,6 +868,10 @@ export async function installToolCollapsePatch(): Promise<() => void> {
   const wasRunningTool = new WeakMap<object, boolean>();
   const lastCodemodeAutoTree = new WeakMap<object, boolean>();
   const lastAutoTreeCheckedVer = new WeakMap<object, number>();
+  // Resolved display level of the last paint. The auto-tree flag alone misses
+  // paints whose level changed without it (a cleared click override, a single
+  // finished call that now skips the calls view), leaving a stale full body.
+  const lastCodemodeLevel = new WeakMap<object, string>();
   const wasStandaloneInParent = new WeakSet<object>();
   type ToolRenderCache =
     | {
@@ -956,6 +960,7 @@ export async function installToolCollapsePatch(): Promise<() => void> {
           override: getViewOverride(this),
           autoTree: summary.autoTree,
         });
+        lastCodemodeLevel.set(this, level);
 
         if (level === "collapsed") {
           this.expanded = false;
@@ -1153,7 +1158,15 @@ export async function installToolCollapsePatch(): Promise<() => void> {
               isError: !running && this.result?.isError === true,
             },
           );
-          if (lastCodemodeAutoTree.get(this) !== wantAutoTree) {
+          const wantLevel = resolveCodemodeDisplay({
+            globalMode: getToolViewMode(),
+            override: getViewOverride(this),
+            autoTree: wantAutoTree,
+          }).level;
+          if (
+            lastCodemodeAutoTree.get(this) !== wantAutoTree ||
+            (lastCodemodeLevel.has(this) && lastCodemodeLevel.get(this) !== wantLevel)
+          ) {
             try {
               this.updateDisplay();
             } catch {

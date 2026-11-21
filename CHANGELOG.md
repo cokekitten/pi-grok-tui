@@ -5,6 +5,8 @@
 ### Fixed
 
 - Keep the MCP server in collapsed tool titles instead of showing only the last name segment: `mcp__browse__execute` rendered as a bare `Execute` (once as the `codemode` header and again as the tree row `└ ✓ Execute 24ms`, so a browse-driven `codemode` row looked like it had no details at all). MCP names now title-case as `<Server> · <Tool>` (`Browse · Execute`, `Browse · Click`; a two-part `mcp__<server>` keeps just the server), and the fallback argument preview also reads `code`, `script`, `js`, `expression`, `ref`, `selector` and `text`, so page-driving tools show what they ran (`Browse · Execute \`await page.click('.x')\``) rather than a bare verb.
+- Collapse a finished single-call `codemode` row in an open turn to one line: the `◆ <title>` header and the `└─ ✓ <title> 24ms` tree row printed the same text twice (most visible with MCP tools, where both read just `Execute`). A single healthy call now renders as one chrome line whose first click opens the script directly (the calls view has nothing of its own to show), while a failed call keeps its row so the error text stays visible and turns with two or more calls keep the full tree.
+- Repaint a `codemode` row when its resolved display level changes, not only when the auto-tree flag flips: a click override cleared while seeding a work rollup (or a single-call row that no longer opens the calls view) left the row painted in its stale FULL body until the next unrelated relayout.
 
 ## [0.3.10] - 2026-11-16
 

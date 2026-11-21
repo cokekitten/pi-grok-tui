@@ -374,30 +374,56 @@ describe("codemode 3-state fold cycle, non-grouping & spacing", () => {
     assert.equal(nextToolFoldMode("codemode", "full"), "chrome");
   });
 
-  it("cycles finished single-call and multi-call codemode collapsed -> calls -> full -> collapsed", () => {
+  it("cycles finished multi-call codemode collapsed -> calls -> full -> collapsed", () => {
     resetClickFoldSession();
     getState().toolViewMode = "chrome";
-    for (const calls of [
-      [{ name: "read", args: '{"path":"a.ts"}', status: "ok" }],
-      [
-        { name: "read", args: '{"path":"a.ts"}', status: "ok" },
-        { name: "bash", args: '{"command":"ls"}', status: "ok" },
-      ],
-    ]) {
-      const finished = {
-        toolName: "codemode",
-        isPartial: false,
-        result: { details: { calls } },
-        updateDisplay() {},
-      };
-      assert.equal(effectiveToolMode(finished, "codemode"), "chrome");
-      assert.equal(toggleToolAt(finished, "codemode"), "truncated");
-      assert.equal(effectiveToolMode(finished, "codemode"), "truncated");
-      assert.equal(toggleToolAt(finished, "codemode"), "full");
-      assert.equal(effectiveToolMode(finished, "codemode"), "full");
-      assert.equal(toggleToolAt(finished, "codemode"), "chrome");
-      assert.equal(effectiveToolMode(finished, "codemode"), "chrome");
-    }
+    const finished = {
+      toolName: "codemode",
+      isPartial: false,
+      result: {
+        details: {
+          calls: [
+            { name: "read", args: '{"path":"a.ts"}', status: "ok" },
+            { name: "bash", args: '{"command":"ls"}', status: "ok" },
+          ],
+        },
+      },
+      updateDisplay() {},
+    };
+    assert.equal(effectiveToolMode(finished, "codemode"), "chrome");
+    assert.equal(toggleToolAt(finished, "codemode"), "truncated");
+    assert.equal(effectiveToolMode(finished, "codemode"), "truncated");
+    assert.equal(toggleToolAt(finished, "codemode"), "full");
+    assert.equal(effectiveToolMode(finished, "codemode"), "full");
+    assert.equal(toggleToolAt(finished, "codemode"), "chrome");
+    assert.equal(effectiveToolMode(finished, "codemode"), "chrome");
+  });
+
+  it("skips the calls view for a finished single healthy call (it would repeat the title)", () => {
+    resetClickFoldSession();
+    getState().toolViewMode = "chrome";
+    const finished = {
+      toolName: "codemode",
+      isPartial: false,
+      result: { details: { calls: [{ name: "read", args: '{"path":"a.ts"}', status: "ok" }] } },
+      updateDisplay() {},
+    };
+    assert.equal(effectiveToolMode(finished, "codemode"), "chrome");
+    assert.equal(toggleToolAt(finished, "codemode"), "full");
+    assert.equal(effectiveToolMode(finished, "codemode"), "full");
+    assert.equal(toggleToolAt(finished, "codemode"), "chrome");
+    assert.equal(effectiveToolMode(finished, "codemode"), "chrome");
+
+    // An errored single call still owns a row: error text lives there.
+    const failed = {
+      toolName: "codemode",
+      isPartial: false,
+      result: {
+        details: { calls: [{ name: "read", args: '{"path":"a.ts"}', status: "error", error: "ENOENT" }] },
+      },
+      updateDisplay() {},
+    };
+    assert.equal(toggleToolAt(failed, "codemode"), "truncated");
   });
 
   it("skips empty calls state on finished 0-call non-error codemode, but keeps calls state on 0-call error", () => {
@@ -593,28 +619,18 @@ describe("ToolExecutionComponent codemode integration", () => {
       assert.equal(s1.length, 1);
       assert.equal(s1[0].trim(), "◆ Write `src/new.ts`");
 
-      // Click 1 on collapsed title: expands to subcall list (with 2 independent click zones)
+      // Click 1 on a finished single healthy call: it has no separate tree row
+      // (that row would only repeat the title), so it opens straight to FULL.
       const singleTitleLine = singleWrite.render(80).find((l) => stripTerminalSequences(l).trim().length > 0);
       const singleId = parseFoldMarker(singleTitleLine);
       assert.ok(singleId);
       assert.equal(dispatchGrokFoldUrl(foldUrl(singleId)), true);
       const s2Raw = singleWrite.render(80).filter((l) => stripTerminalSequences(l).trim().length > 0);
-      const s2 = s2Raw.map((l) => stripTerminalSequences(l).trim());
-      assert.equal(s2.length, 2);
-      assert.equal(s2[0], "◆ Write `src/new.ts`");
-      assert.equal(s2[1], "└─ ✓ Write `src/new.ts` 9ms");
-
-      // Clicking the TITLE zone while in subcall list directly collapses back to 1 line!
-      assert.equal(dispatchGrokFoldUrl(foldUrl(singleId)), true);
-      assert.equal(plainLines(singleWrite).filter((l) => l.trim().length > 0).length, 1);
-
-      // Re-open subcall list via title, then click LOWER zone to advance 3-state cycle to FULL!
-      assert.equal(dispatchGrokFoldUrl(foldUrl(singleId)), true);
-      const singleTreeFoldId = parseFoldMarker(
-        singleWrite.render(80).find((l) => stripTerminalSequences(l).includes("└─ ✓ Write")),
+      assert.equal(s2Raw.length > 1, true, "single call must skip the duplicate calls row");
+      assert.equal(
+        s2Raw.map((l) => stripTerminalSequences(l).trim()).filter((l) => l.startsWith("└─")).length,
+        0,
       );
-      assert.equal(singleTreeFoldId, codemodeBodyFoldId(singleWrite));
-      assert.equal(dispatchGrokFoldUrl(foldUrl(singleTreeFoldId)), true);
       const rawFull = singleWrite.render(80);
       const plainFull = rawFull.map(stripTerminalSequences);
       assert.ok(plainFull.some((l) => l.includes('const msg = "hello";')));
@@ -624,10 +640,16 @@ describe("ToolExecutionComponent codemode integration", () => {
       const jsAnsiLine = rawFull.find((l) => stripTerminalSequences(l).includes("const msg"));
       assert.ok(jsAnsiLine && !jsAnsiLine.includes("38;2;74;74;74m"), "JS syntax highlight must not be dimmed to BODY_FG");
 
-      // Lower body carries body fold ID; clicking it completes 3-state cycle back to 1-line chrome
+      // Lower body carries body fold ID; clicking it folds FULL back to 1-line chrome
       const bodyMarker = parseFoldMarker(jsAnsiLine);
       assert.equal(bodyMarker, codemodeBodyFoldId(singleWrite));
       assert.equal(dispatchGrokFoldUrl(foldUrl(bodyMarker)), true);
+      assert.equal(plainLines(singleWrite).filter((l) => l.trim().length > 0).length, 1);
+
+      // Title click on the collapsed row re-opens FULL; title click inside FULL collapses again
+      assert.equal(dispatchGrokFoldUrl(foldUrl(singleId)), true);
+      assert.ok(plainLines(singleWrite).some((l) => l.includes('const msg = "hello";')));
+      assert.equal(dispatchGrokFoldUrl(foldUrl(singleId)), true);
       assert.equal(plainLines(singleWrite).filter((l) => l.trim().length > 0).length, 1);
 
       // 3. Multi-call: live subcall list while running -> auto-collapses to 1-line ◇ summary on finish!
@@ -957,6 +979,60 @@ describe("Codemode Ctrl+O cycle & scroll render cache", () => {
     } finally {
       cleanups.reverse().forEach((fn) => fn());
     }
+  });
+});
+
+describe("codemode-style: single finished call in an open turn", () => {
+  it("collapses to one chrome line instead of repeating the header on a tree row", () => {
+    const oneOk = summarizeCodemodeChrome(
+      { code: "x" },
+      { details: { calls: [{ name: "mcp__browse__execute", args: '{"code":"await page.click(\'.x\')"}', status: "ok", durationMs: 24 }] } },
+      { running: false, inUnclosedTurn: true, cwd: "/proj" },
+    );
+    assert.equal(oneOk.autoTree, false);
+    assert.equal(oneOk.label, "Browse · Execute `await page.click('.x')`");
+    assert.deepEqual(
+      resolveCodemodeDisplay({ globalMode: "chrome", override: undefined, autoTree: oneOk.autoTree }),
+      { level: "collapsed", autoCompact: false },
+    );
+
+    // Two finished calls keep the tree: the list is real information there.
+    const twoOk = summarizeCodemodeChrome(
+      { code: "x" },
+      {
+        details: {
+          calls: [
+            { name: "mcp__browse__navigate", args: '{"url":"https://a.test"}', status: "ok", durationMs: 900 },
+            { name: "read", args: '{"path":"a.ts"}', status: "ok", durationMs: 4 },
+          ],
+        },
+      },
+      { running: false, inUnclosedTurn: true, cwd: "/proj" },
+    );
+    assert.equal(twoOk.autoTree, true);
+
+    // A failed call keeps its row so the error text stays visible.
+    const oneErr = summarizeCodemodeChrome(
+      { code: "x" },
+      {
+        isError: false,
+        details: {
+          calls: [
+            { name: "mcp__browse__execute", args: '{"code":"await page.click(\'.x\')"}', status: "error", durationMs: 21, error: "TimeoutError: No element matched" },
+          ],
+        },
+      },
+      { running: false, inUnclosedTurn: true, cwd: "/proj" },
+    );
+    assert.equal(oneErr.autoTree, true);
+
+    // A script error with no nested call still needs the calls view.
+    const scriptErr = summarizeCodemodeChrome(
+      { code: "x" },
+      { isError: true, content: [{ type: "text", text: "Script failed\nWall time 0.1 seconds\nOutput:\n" }, { type: "text", text: "Script error:\nTypeError: nope" }], details: { calls: [] } },
+      { running: false, inUnclosedTurn: true, cwd: "/proj" },
+    );
+    assert.equal(scriptErr.autoTree, true);
   });
 });
 

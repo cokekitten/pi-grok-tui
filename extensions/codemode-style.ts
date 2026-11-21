@@ -525,7 +525,11 @@ export function isCodemodeAutoTree(
 ): boolean {
   if (opts.running) return true;
   if (opts.inUnclosedTurn) {
-    return calls.length > 0 || Boolean(opts.isError);
+    if (opts.isError) return true;
+    // A single finished call adds nothing to the chrome title: its tree row
+    // only repeats the header (plus a duration), so keep one line as soon as
+    // the script is done and no error detail needs the room.
+    return calls.length >= 2;
   }
   return false;
 }
@@ -563,7 +567,8 @@ export function summarizeCodemodeChrome(
   const autoTree = isCodemodeAutoTree(calls, {
     running: opts.running,
     inUnclosedTurn: opts.inUnclosedTurn,
-    isError,
+    // A failed nested call keeps its row: the error text lives there.
+    isError: isError || failedCalls > 0,
   });
   const scriptError = isError ? extractCodemodeScriptError(result) : undefined;
 

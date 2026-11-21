@@ -105,7 +105,12 @@ function codemodeHasTreeRows(target: object): boolean {
     "isPartial" in t ? Boolean(t.isPartial || t.result == null) : t.result == null;
   if (running) return true;
   const calls = extractCodemodeCalls(t.result?.details);
-  if (calls.length > 0) return true;
+  if (calls.length > 1) return true;
+  if (calls.length === 1) {
+    // One finished healthy call renders no tree row (it would only repeat the
+    // chrome title), so the calls view has nothing to show: skip to "full".
+    return calls[0]!.status !== "ok" || t.result?.isError === true;
+  }
   return t.result?.isError === true;
 }
 
