@@ -409,10 +409,10 @@ describe("custom message & custom entry Grok chrome collapse", () => {
       "  另外，死信脚本重排时会给错误记录加一个标记。",
       "",
       "  ◇ [subagent] worker needs a decision",
-      "  ◆ Subagent Supervisor",
+      "  ◆ Subagent Supervisor `reply`",
       "  ◇ [subagent] reply sent to worker",
       "  ◇ [intercom] From subagent-chat-01a07d4d-0da4-717e: 方案都对，补两个细节，实现时顺手处理：1. 只缓存 {sha, size}",
-      "  ◆ Subagent",
+      "  ◆ Subagent `steer`",
       "",
       "  GPU 会话补的两点细节已转给 worker：",
     ]);
@@ -503,7 +503,7 @@ describe("custom message & custom entry Grok chrome collapse", () => {
     // Collapsed chrome: tight stack, no blank line between ◆ Subagent Supervisor and ◇ [subagent] reply
     assert.deepEqual(
       chat.render(100).map((l) => stripEsc(l).trimEnd()),
-      ["  ◆ Subagent Supervisor", "  ◇ [subagent] reply sent to worker"],
+      ["  ◆ Subagent Supervisor `reply`", "  ◇ [subagent] reply sent to worker"],
     );
 
     // Click ◆ Subagent Supervisor -> expands tool body AND inserts 1 blank line before ◇ [subagent] reply
@@ -518,7 +518,7 @@ describe("custom message & custom entry Grok chrome collapse", () => {
     assert.equal(dispatchGrokFoldUrl(foldUrl(toolFoldId)), true);
     assert.deepEqual(
       chat.render(100).map((l) => stripEsc(l).trimEnd()),
-      ["  ◆ Subagent Supervisor", "  ◇ [subagent] reply sent to worker"],
+      ["  ◆ Subagent Supervisor `reply`", "  ◇ [subagent] reply sent to worker"],
     );
   });
 

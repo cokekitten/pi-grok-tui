@@ -8,6 +8,8 @@
 - Collapse a finished single-call `codemode` row in an open turn to one line: the `◆ <title>` header and the `└─ ✓ <title> 24ms` tree row printed the same text twice (most visible with MCP tools, where both read just `Execute`). A single healthy call now renders as one chrome line whose first click opens the script directly (the calls view has nothing of its own to show), while a failed call keeps its row so the error text stays visible and turns with two or more calls keep the full tree.
 - Repaint a `codemode` row when its resolved display level changes, not only when the auto-tree flag flips: a click override cleared while seeding a work rollup (or a single-call row that no longer opens the calls view) left the row painted in its stale FULL body until the next unrelated relayout.
 
+- Preview extension-tool arguments in chrome titles instead of a bare name: `subagent` (`◆ Subagent \`researcher\``), `subagent_supervisor` / `contact_supervisor` (`action` / `reason`), `memory_write` / `memory_forget` (`target` / `match`), background-task tools (`id`, and `task_ids` as `bg-1 +2`), `ask_user` (`question`) and `scratchpad` (`action` wins over the free-text `text`).
+
 ## [0.3.10] - 2026-11-16
 
 ### Fixed

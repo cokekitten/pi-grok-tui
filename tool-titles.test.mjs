@@ -114,6 +114,46 @@ describe("formatToolTitle", () => {
       formatToolTitle("mcp__browse__click", { selector: ".submit" }),
       "Browse · Click `.submit`",
     );
+  it("previews extension tool arguments (subagent / supervisor / memory / background / ask_user)", () => {
+    assert.equal(
+      formatToolTitle("subagent", { agent: "researcher", task: "查一下 sunrise MR 的审核意见" }),
+      "Subagent `researcher`",
+    );
+    assert.equal(
+      formatToolTitle("subagent_supervisor", { action: "reply", replyTo: "r1" }),
+      "Subagent Supervisor `reply`",
+    );
+    assert.equal(
+      formatToolTitle("contact_supervisor", { reason: "need_decision", message: "blocking?" }),
+      "Contact Supervisor `need_decision`",
+    );
+    assert.equal(
+      formatToolTitle("memory_write", { target: "daily", content: "x" }),
+      "Memory Write `daily`",
+    );
+    assert.equal(
+      formatToolTitle("memory_forget", { match: "stale fact", target: "long_term" }),
+      "Memory Forget `stale fact`",
+    );
+    assert.equal(
+      formatToolTitle("get_background_output", { id: "bg-7", tail: 4000 }),
+      "Get Background Output `bg-7`",
+    );
+    assert.equal(
+      formatToolTitle("wait_tasks", { task_ids: ["bg-1", "bg-2", "bg-3"] }),
+      "Wait Tasks `bg-1 +2`",
+    );
+    assert.equal(
+      formatToolTitle("ask_user", { question: "要修吗？" }),
+      "Ask User `要修吗？`",
+    );
+    // action wins over the free-text body on scratchpad-style tools
+    assert.equal(
+      formatToolTitle("scratchpad", { action: "done", text: "runner 待办" }),
+      "Scratchpad `done`",
+    );
+  });
+
     // Multi-line code collapses to one line and truncates.
     const title = formatToolTitle("mcp__browse__execute", {
       code: "const tab = await pages.open();\nawait tab.goto('https://example.com/very/long/path')",

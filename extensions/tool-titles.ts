@@ -37,6 +37,14 @@ function str(value: unknown): string | undefined {
   return undefined;
 }
 
+/** `["a","b","c"]` reads as `a +2`: enough to identify, short enough for a title. */
+function listPreview(value: unknown): string | undefined {
+  if (!Array.isArray(value)) return str(value);
+  const parts = value.filter((v): v is string => typeof v === "string" && v.length > 0);
+  if (parts.length === 0) return undefined;
+  return parts.length === 1 ? parts[0]! : `${parts[0]!} +${parts.length - 1}`;
+}
+
 /** Collapse all whitespace (incl. newlines) to single spaces — keeps titles one line. */
 export function flattenOneLine(s: string): string {
   return s.replace(/\s+/g, " ").trim();
@@ -280,7 +288,18 @@ export function formatToolTitle(
         str(a.expression) ??
         str(a.ref) ??
         str(a.selector) ??
+        // Extension tools whose subject lives in a domain key: subagent
+        // (`agent`), supervisor cards (`action`/`reason`), memory tools
+        // (`match`/`target`), background tasks (`id`), ask_user (`question`).
+        str(a.agent) ??
+        str(a.action) ??
+        str(a.match) ??
+        str(a.target) ??
+        str(a.reason) ??
+        str(a.id) ??
+        str(a.question) ??
         str(a.text) ??
+        listPreview(a.task_ids) ??
         str(a.tool_name);
       if (preview) {
         return `${label} \`${truncateChars(preview, 48)}\``;
