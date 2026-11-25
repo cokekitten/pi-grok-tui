@@ -1230,7 +1230,16 @@ export async function installWorkRollupPatch(): Promise<() => void> {
   );
   const theme = rawTheme as ChromeTheme;
 
+  // Pi 1.6 resolves mouse targets from childLines. Older hosts use mouseLayout.
+  interface ChatChildLines {
+    width: number;
+    children: unknown[];
+    parts: Array<readonly string[]>;
+    lines: string[];
+  }
+
   const proto = Container.prototype as unknown as {
+    childLines?: ChatChildLines;
     children?: unknown[];
     mouseLayout?: {
       width: number;
@@ -1245,12 +1254,10 @@ export async function installWorkRollupPatch(): Promise<() => void> {
   const openHeaderFirstChildren = new Set<object>();
 
   interface ChatFrameCache {
-    width: number;
     modeKey: number;
     slotKeys: unknown[];
-    slotOutputs: Array<readonly string[]>;
     slotLineOffsets: number[];
-    lines: string[];
+    childLines: ChatChildLines;
     mouseLayout: {
       width: number;
       children: Array<{ component: unknown; height: number }>;
@@ -1354,13 +1361,13 @@ export async function installWorkRollupPatch(): Promise<() => void> {
     modeKey: number,
     slotKeys: unknown[],
     slotOutputs: Array<readonly string[]>,
-    buildMouseChildren: () => Array<{ component: unknown; height: number }>,
+    buildMouseChildren: () => unknown[],
   ): string[] => {
     const prev = chatFrameCache.get(container);
     const slotCount = slotOutputs.length;
     if (
       prev &&
-      prev.width === width &&
+      prev.childLines.width === width &&
       prev.modeKey === modeKey &&
       prev.slotKeys.length === slotCount
     ) {
@@ -1372,7 +1379,7 @@ export async function installWorkRollupPatch(): Promise<() => void> {
           break;
         }
         const curOut = slotOutputs[s]!;
-        const prevOut = prev.slotOutputs[s]!;
+        const prevOut = prev.childLines.parts[s]!;
         if (curOut !== prevOut) {
           if (curOut.length !== prevOut.length) {
             keysAndHeightsMatch = false;
@@ -1385,10 +1392,11 @@ export async function installWorkRollupPatch(): Promise<() => void> {
       if (keysAndHeightsMatch) {
         if (changedSlots.length === 0) {
           container.mouseLayout = prev.mouseLayout;
-          return prev.lines;
+          if ("childLines" in container) container.childLines = prev.childLines;
+          return prev.childLines.lines;
         }
-        // Same slot heights (e.g. hover highlight moved between rows): patch changed slices in O(changedLines)
-        const nextLines = prev.lines.slice();
+        // Row offsets are unchanged (e.g. moving a hover highlight).
+        const nextLines = prev.childLines.lines.slice();
         for (let c = 0; c < changedSlots.length; c++) {
           const s = changedSlots[c]!;
           const offset = prev.slotLineOffsets[s]!;
@@ -1397,9 +1405,9 @@ export async function installWorkRollupPatch(): Promise<() => void> {
             nextLines[offset + j] = curOut[j]!;
           }
         }
-        prev.slotOutputs = slotOutputs;
-        prev.lines = nextLines;
+        prev.childLines = { ...prev.childLines, parts: slotOutputs, lines: nextLines };
         container.mouseLayout = prev.mouseLayout;
+        if ("childLines" in container) container.childLines = prev.childLines;
         return nextLines;
       }
     }
@@ -1413,17 +1421,15 @@ export async function installWorkRollupPatch(): Promise<() => void> {
         lines.push(out[j]!);
       }
     }
-    const mouseLayout = { width, children: buildMouseChildren() };
-    container.mouseLayout = mouseLayout;
-    chatFrameCache.set(container, {
+    const children = buildMouseChildren();
+    const mouseLayout = {
       width,
-      modeKey,
-      slotKeys,
-      slotOutputs,
-      slotLineOffsets,
-      lines,
-      mouseLayout,
-    });
+      children: children.map((component, i) => ({ component, height: slotOutputs[i]!.length })),
+    };
+    const childLines = { width, children, parts: slotOutputs, lines };
+    container.mouseLayout = mouseLayout;
+    if ("childLines" in container) container.childLines = childLines;
+    chatFrameCache.set(container, { modeKey, slotKeys, slotLineOffsets, childLines, mouseLayout });
     return lines;
   };
 
@@ -1459,13 +1465,7 @@ export async function installWorkRollupPatch(): Promise<() => void> {
         slotKeys[i] = child;
         slotOutputs[i] = renderChildFast(child, width);
       }
-      return assembleOrReuseFrame(this, width, 0, slotKeys, slotOutputs, () => {
-        const mouseChildren = new Array<{ component: unknown; height: number }>(n);
-        for (let i = 0; i < n; i++) {
-          mouseChildren[i] = { component: children[i], height: slotOutputs[i]!.length };
-        }
-        return mouseChildren;
-      });
+      return assembleOrReuseFrame(this, width, 0, slotKeys, slotOutputs, () => slotKeys);
     }
 
     const scan = getOrBuildContainerScan(this);
@@ -1479,13 +1479,7 @@ export async function installWorkRollupPatch(): Promise<() => void> {
         slotKeys[i] = child;
         slotOutputs[i] = renderChildFast(child, width);
       }
-      return assembleOrReuseFrame(this, width, 0, slotKeys, slotOutputs, () => {
-        const mouseChildren = new Array<{ component: unknown; height: number }>(n);
-        for (let i = 0; i < n; i++) {
-          mouseChildren[i] = { component: children[i], height: slotOutputs[i]!.length };
-        }
-        return mouseChildren;
-      });
+      return assembleOrReuseFrame(this, width, 0, slotKeys, slotOutputs, () => slotKeys);
     }
 
     (this as unknown as Record<symbol, unknown>)[ROLLUP_PASS_KEY] = scan;
@@ -1536,37 +1530,20 @@ export async function installWorkRollupPatch(): Promise<() => void> {
       }
 
       return assembleOrReuseFrame(this, width, 1, slotKeys, slotOutputs, () => {
-        const mouseChildren: Array<{ component: unknown; height: number }> = [];
+        const mouseChildren: unknown[] = [];
         let cursor = 0;
-        let slotIdx = 0;
         while (cursor < children.length) {
           const seg = scan.byStartIndex.get(cursor);
           if (!seg) {
-            mouseChildren.push({
-              component: children[cursor],
-              height: slotOutputs[slotIdx]!.length,
-            });
-            slotIdx += 1;
+            mouseChildren.push(children[cursor]);
             cursor += 1;
             continue;
           }
-          const open = slotKeys[slotIdx] === seg;
-          mouseChildren.push({
-            component: NOOP_MOUSE_COMPONENT,
-            height: slotOutputs[slotIdx]!.length,
-          });
-          slotIdx += 1;
-          if (!open) {
+          const open = slotKeys[mouseChildren.length] === seg;
+          mouseChildren.push(NOOP_MOUSE_COMPONENT);
+          if (open) {
             for (let k = seg.startIndex; k <= seg.endIndex; k++) {
-              mouseChildren.push({ component: children[k], height: 0 });
-            }
-          } else {
-            for (let k = seg.startIndex; k <= seg.endIndex; k++) {
-              mouseChildren.push({
-                component: children[k],
-                height: slotOutputs[slotIdx]!.length,
-              });
-              slotIdx += 1;
+              mouseChildren.push(children[k]);
             }
           }
           cursor = seg.endIndex + 1;

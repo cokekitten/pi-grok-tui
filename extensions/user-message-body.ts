@@ -9,8 +9,9 @@
  * so repeated renders return identical string objects (keeps downstream
  * identity-based diffing cheap).
  */
-import { Markdown, visibleWidth } from "@earendil-works/pi-tui";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { ansiBgHex, ansiFgHex } from "./chrome.ts";
+import { TranscriptMarkdown } from "./transcript-markdown.js";
 
 /** Near-black user bubble (requested). */
 export const USER_MESSAGE_BG = "#0f1217";
@@ -45,7 +46,7 @@ export function createArrowMarkdownBody(
   const firstPrefix = " ".repeat(outputPad) + arrow;
   const contPrefix = " ".repeat(outputPad) + "  ";
 
-  const md = new Markdown(
+  const md = new TranscriptMarkdown(
     text,
     0,
     0,

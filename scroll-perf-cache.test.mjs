@@ -453,6 +453,34 @@ describe("parent-stamp O(1) sibling index & chatContainer work-rollup frame cach
       assert.equal(second, first);
       assert.equal(chat.mouseLayout, firstLayout);
 
+      // Pi dispatches high-frequency terminal mouse input through Container.handleMouse.
+      // Folded children must stay out of that path, and the row below the summary
+      // must reach its visible component with the painted coordinates.
+      const hiddenTone = chat.children[2];
+      const originalHiddenRender = hiddenTone.render;
+      let hiddenPaints = 0;
+      hiddenTone.render = function (width) {
+        hiddenPaints++;
+        return originalHiddenRender.call(this, width);
+      };
+      const finalRow = first.findLastIndex(line => line.includes("response complete."));
+      assert.ok(finalRow >= 0);
+      const mouse = { type: "move", x: 1, y: finalRow, screenX: 1, screenY: finalRow, width: 120, height: first.length };
+      let hit;
+      lastProse.handleMouse = (event) => {
+        hit = event;
+        return { handled: true };
+      };
+      try {
+        for (let i = 0; i < 20; i++) chat.handleMouse(mouse);
+        assert.equal(hiddenPaints, 0, "mouse routing must not render collapsed history");
+        assert.ok(hit, "mouse routing must use the painted rollup coordinates");
+        assert.ok(hit.y >= 0 && hit.y < hit.height);
+      } finally {
+        hiddenTone.render = originalHiddenRender;
+        delete lastProse.handleMouse;
+      }
+
       // Hovering one rollup header patches only that row and preserves mouseLayout identity
       const rId = rollupFoldId(lastProse);
       getState().hoveredFoldId = rId;

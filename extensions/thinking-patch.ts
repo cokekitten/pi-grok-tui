@@ -1,7 +1,7 @@
 /**
  * Monkey-patch AssistantMessageComponent to use ThinkingScrollComponent.
  */
-import { Markdown, Spacer, Text } from "@earendil-works/pi-tui";
+import { Spacer, Text } from "@earendil-works/pi-tui";
 import {
   importInternal,
   PI_CODING_AGENT,
@@ -16,6 +16,7 @@ import { RESPONSE_LEFT_PAD, safeFg } from "./chrome.js";
 import { bumpChatLayoutVersion } from "./state.js";
 import { ThinkingScrollComponent, type ThinkingThemeLike } from "./thinking-render.js";
 import { markdownTransformFor, type MarkdownTransformSource } from "./markdown-transform.ts";
+import { TranscriptMarkdown } from "./transcript-markdown.js";
 
 const AMC_PATCHED_GEN = Symbol.for("pi-grok-tui.amcPatchGen");
 let amcGeneration = 0;
@@ -151,7 +152,7 @@ export async function installThinkingPatch(): Promise<() => void> {
   const originalSetHiddenThinkingLabel = prototype.setHiddenThinkingLabel;
 
   type RenderSlot =
-    | { kind: "text"; component: Markdown }
+    | { kind: "text"; component: TranscriptMarkdown }
     | { kind: "thinking"; component: ThinkingScrollComponent };
   // Patch-local state neither retains old sessions nor collides with Pi's own
   // markdownSlots. A new patch generation starts with clean slots after /reload.
@@ -247,7 +248,7 @@ export async function installThinkingPatch(): Promise<() => void> {
         if (block.type === "text" && (block.text || "").trim().length > 0) {
           const text = (block.text || "").trim();
           const slot = previousSlots[slots.length];
-          const component = slot?.kind === "text" ? slot.component : new Markdown(
+          const component = slot?.kind === "text" ? slot.component : new TranscriptMarkdown(
             text, padX, 0, this.markdownTheme as any, undefined,
             { transform: markdownTransformFor(this, "assistant") },
           );

@@ -24,7 +24,7 @@ import {
   toggleToolTitleAt,
 } from "./extensions/tool-click.ts";
 import { shouldGapAfter, installParentStamp } from "./extensions/parent-stamp.ts";
-import { clearToolFoldOverrides, getState, resetClickFoldSession } from "./extensions/state.ts";
+import { bumpChatLayoutVersion, clearToolFoldOverrides, getState, resetClickFoldSession } from "./extensions/state.ts";
 import {
   AssistantMessageComponent,
   ToolExecutionComponent,
@@ -871,6 +871,40 @@ describe("ToolExecutionComponent codemode integration", () => {
 });
 
 describe("Codemode Ctrl+O cycle & scroll render cache", () => {
+  it("keeps a finished single failed subcall cached while its turn is open", async () => {
+    const restoreStamp = installParentStamp();
+    const restoreTools = await installToolCollapsePatch();
+    try {
+      resetFoldHandlers();
+      resetClickFoldSession();
+      Object.assign(getState(), { toolViewMode: "chrome", tuiMode: "fullscreen", clickFoldReady: true });
+      const chat = new Container();
+      chat.addChild(new UserMessageComponent("Check a file", getMarkdownTheme(), 1, []));
+      const tool = new ToolExecutionComponent(
+        "codemode", "failed-read", { code: "await tools.read({path: 'missing.ts'})" },
+        {}, codemodeDef, { requestRender() {} }, "/proj",
+      );
+      chat.addChild(tool);
+      tool.updateResult({
+        content: [{ type: "text", text: "Script completed" }],
+        isError: false,
+        details: { calls: [{ name: "read", args: '{"path":"missing.ts"}', status: "error" }] },
+      }, false);
+
+      const initial = tool.render(80);
+      assert.match(initial.map(stripTerminalSequences).join("\n"), /└─ ✗ Read/);
+      // An unrelated update can invalidate the chat layout between paints.
+      bumpChatLayoutVersion();
+      assert.equal(tool.render(80), initial, "an unchanged tool must keep its cached rows");
+
+      chat.addChild(new UserMessageComponent("Next task", getMarkdownTheme(), 1, []));
+      assert.doesNotMatch(plainLines(tool).join("\n"), /└─ ✗ Read/);
+    } finally {
+      restoreTools();
+      restoreStamp();
+    }
+  });
+
   it("cycles codemode through compact -> calls -> full -> compact via Ctrl+O and reuses cached tree lines", async () => {
     const cleanups = [
       installParentStamp(),

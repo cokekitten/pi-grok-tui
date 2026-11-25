@@ -164,6 +164,43 @@ describe("thinking lifecycle and cache boundaries", () => {
 });
 
 describe("Markdown transformer interoperability", () => {
+  it("reuses Markdown when switching back to a recent terminal width", () => {
+    const seen = [];
+    const transform = (text, ctx) => {
+      seen.push(ctx.availableWidth);
+      return text + " width=" + ctx.availableWidth;
+    };
+    const a = new AssistantMessageComponent(undefined, false, getMarkdownTheme(), "Thinking...", 1, [transform]);
+    const u = new UserMessageComponent("USER", getMarkdownTheme(), 1, [transform]);
+    a.updateContent(message([prose("ASSISTANT")]));
+    for (const c of [a, u]) {
+      seen.length = 0;
+      const wide = c.render(200);
+      const narrow = c.render(181);
+      assert.notDeepEqual(wide, narrow);
+      assert.deepEqual(c.render(200), wide);
+      assert.deepEqual(c.render(181), narrow);
+      assert.deepEqual(seen, [196, 177]);
+
+      // With only two widths retained, a third size evicts the least recent.
+      c.render(120);
+      assert.deepEqual(c.render(181), narrow);
+      assert.deepEqual(c.render(200), wide);
+      assert.deepEqual(seen, [196, 177, 116, 196]);
+
+      c.invalidate();
+      assert.deepEqual(c.render(200), wide);
+      assert.deepEqual(c.render(181), narrow);
+      assert.deepEqual(seen, [196, 177, 116, 196, 196, 177]);
+    }
+    a.updateContent(message([prose("REPLACED")]));
+    for (const width of [181, 200]) {
+      const output = a.render(width).map(stripTerminalSequences).join("\n");
+      assert.match(output, /REPLACED/);
+      assert.doesNotMatch(output, /ASSISTANT/);
+    }
+  });
+
   it("forwards saved user context and exact bubble width in load order without mutating text", () => {
     const seen = [];
     const transforms = [
